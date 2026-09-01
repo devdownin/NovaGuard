@@ -5,6 +5,7 @@ import Slider from '@react-native-community/slider';
 import { color, font, radius } from '../theme';
 import { useAppState } from '../state/AppStateContext';
 import { Retention, Sensitivity } from '../state/types';
+import { formatBytes } from '../recording/library';
 import { APP_LICENSE, APP_VERSION, ISSUES_URL, REPO_URL } from '../constants/app';
 import { CollapsibleSection } from '../components/CollapsibleSection';
 import { SettingRow, StaticValue, ValueButton } from '../components/SetupRows';
@@ -23,7 +24,13 @@ const RETENTION_OPTIONS: Retention[] = ['1 jour', '7 jours', '30 jours', '90 jou
 
 export function SetupScreen() {
   const s = useAppState();
-  const { settings, events } = s;
+  const { settings, events, storage: store } = s;
+
+  // Share of the whole volume taken by NovaGuard's own clips. Kept visible at a
+  // sliver once anything is stored, so the bar never reads as "nothing on disk".
+  const usedPercent = store.total > 0
+    ? Math.min(100, Math.max(store.used > 0 ? 1 : 0, (store.used / store.total) * 100))
+    : 0;
 
   return (
     <View style={styles.screen}>
@@ -82,9 +89,6 @@ export function SetupScreen() {
         </CollapsibleSection>
 
         <CollapsibleSection title="ENREGISTREMENT" expanded={settings.exp.rec} onToggle={() => s.toggleSection('rec')}>
-          <SettingRow label="Durée avant détection">
-            <ValueButton label={settings.pre} onPress={s.cyclePre} />
-          </SettingRow>
           <SettingRow label="Durée après détection">
             <ValueButton label={settings.post} onPress={s.cyclePost} />
           </SettingRow>
@@ -99,16 +103,16 @@ export function SetupScreen() {
         <CollapsibleSection title="STOCKAGE" expanded={settings.exp.sto} onToggle={() => s.toggleSection('sto')}>
           <View style={[styles.subBlock, { borderTopWidth: 1, borderTopColor: color.divider }]}>
             <View style={styles.storageBarTrack}>
-              <View style={styles.storageBarFill} />
+              <View style={[styles.storageBarFill, { width: `${usedPercent}%` }]} />
             </View>
             <View style={styles.storageStatsRow}>
               <View>
                 <Text style={styles.storageStatLabel}>Utilisé</Text>
-                <Text style={styles.storageStatValue}>7,9 Go</Text>
+                <Text style={styles.storageStatValue}>{formatBytes(store.used)}</Text>
               </View>
               <View>
                 <Text style={styles.storageStatLabel}>Disponible</Text>
-                <Text style={styles.storageStatValue}>24,8 Go</Text>
+                <Text style={styles.storageStatValue}>{formatBytes(store.free)}</Text>
               </View>
               <View>
                 <Text style={styles.storageStatLabel}>Vidéos</Text>
@@ -242,7 +246,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   storageBarFill: {
-    width: '24%',
     height: '100%',
     backgroundColor: color.accent600,
   },

@@ -3,12 +3,12 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { color, font } from '../theme';
 import { DetectionEvent } from '../state/types';
-import { formatWhen, pad } from '../utils/date';
+import { formatDuration, formatWhen } from '../utils/date';
 import { ChevronRightIcon } from './icons';
 
 export function EventCard({ event, onPress }: { event: DetectionEvent; onPress: () => void }) {
   const title = event.kind === 'Personne' ? 'Personne détectée' : 'Animal détecté';
-  const durLabel = '0:' + pad(event.dur);
+  const durLabel = formatDuration(event.dur);
 
   return (
     <Pressable onPress={onPress} style={styles.card}>

@@ -29,6 +29,7 @@
     "test": "jest"
   },
   "dependencies": {
+    "@dr.pogodin/react-native-fs": "^2.40.1",
     "@react-native-async-storage/async-storage": "^3.1.1",
     "@react-native-community/slider": "^5.2.1",
     "react": "19.1.0",
@@ -37,6 +38,7 @@
     "react-native-linear-gradient": "^2.8.3",
     "react-native-safe-area-context": "^5.5.2",
     "react-native-svg": "^15.15.5",
+    "react-native-video": "^6.19.2",
     "react-native-vision-camera": "^4.7.3",
     "react-native-vision-camera-face-detector": "^1.10.2",
     "react-native-worklets-core": "^1.6.3",

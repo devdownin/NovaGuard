@@ -1,30 +1,62 @@
-import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import Video from 'react-native-video';
 import { color, font, radius } from '../theme';
 import { useAppState } from '../state/AppStateContext';
+import { formatBytes } from '../recording/library';
 import { formatWhen } from '../utils/date';
 import { Sheet } from './Sheet';
 import { PlayIcon } from './icons';
-import { PrimaryOutlineButton, SecondaryOutlineButton, TextButton } from './OutlineButton';
+import { SecondaryOutlineButton, TextButton } from './OutlineButton';
 
 export function VideoDetailSheet() {
   const { events, selected, selectEvent, askDelete } = useAppState();
   const event = events.find(e => e.id === selected) ?? null;
+  const [playing, setPlaying] = useState(false);
+
+  // Never carry playback over from the previously opened event.
+  useEffect(() => { setPlaying(false); }, [selected]);
+
+  const close = useCallback(() => {
+    setPlaying(false);
+    selectEvent(null);
+  }, [selectEvent]);
+
+  const hasClip = !!event?.path;
 
   return (
-    <Sheet visible={!!event} onClose={() => selectEvent(null)}>
+    <Sheet visible={!!event} onClose={close}>
       {event && (
         <View>
           <View style={styles.preview}>
             <LinearGradient colors={['#252838', '#0f1119']} start={{ x: 0.1, y: 0 }} end={{ x: 0.9, y: 1 }} style={StyleSheet.absoluteFill} />
-            <View style={styles.previewFrame} />
-            <View style={styles.playButton}>
-              <PlayIcon size={16} color={color.accent} />
-            </View>
-            <View style={styles.progressTrack}>
-              <View style={styles.progressFill} />
-            </View>
+
+            {hasClip && playing ? (
+              <Video
+                source={{ uri: `file://${event.path}` }}
+                style={StyleSheet.absoluteFill}
+                resizeMode="contain"
+                controls
+                paused={false}
+                onEnd={() => setPlaying(false)}
+                onError={() => setPlaying(false)}
+              />
+            ) : hasClip ? (
+              <Pressable
+                style={styles.playButton}
+                onPress={() => setPlaying(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Lire l'enregistrement"
+              >
+                <PlayIcon size={16} color={color.accent} />
+              </Pressable>
+            ) : (
+              // A sighting with no file: recording was refused, the disk was
+              // full, or the clip has been reclaimed. Say so instead of showing
+              // a play button that would do nothing.
+              <Text style={styles.noClip}>AUCUNE VIDÉO POUR CET ÉVÈNEMENT</Text>
+            )}
           </View>
 
           <View style={styles.titleRow}>
@@ -37,14 +69,13 @@ export function VideoDetailSheet() {
             <StatCell label="Type" value={event.kind} />
             <StatCell label="Durée" value={`${event.dur} secondes`} />
             <StatCell label="Confiance" value={`${event.conf} %`} accent />
-            <StatCell label="Fichier" value={event.size} />
+            <StatCell label="Fichier" value={hasClip ? formatBytes(event.bytes) : '—'} />
             <StatCell label="Stockage" value="Local" />
           </View>
 
           <View style={styles.actions}>
-            <PrimaryOutlineButton label="Partager" onPress={() => {}} style={{ flex: 1 }} />
             <SecondaryOutlineButton label="Supprimer" onPress={askDelete} style={{ flex: 1 }} />
-            <TextButton label="Fermer" onPress={() => selectEvent(null)} style={{ flex: 1 }} />
+            <TextButton label="Fermer" onPress={close} style={{ flex: 1 }} />
           </View>
         </View>
       )}
@@ -67,16 +98,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg - 2,
     overflow: 'hidden',
   },
-  previewFrame: {
-    position: 'absolute',
-    left: '20%',
-    top: '16%',
-    width: '40%',
-    height: '62%',
-    borderWidth: 1.5,
-    borderColor: color.accent600,
-    borderRadius: 5,
-  },
   playButton: {
     position: 'absolute',
     left: '50%',
@@ -92,20 +113,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(22,24,38,0.5)',
   },
-  progressTrack: {
+  noClip: {
     position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 11,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: 'rgba(233,233,237,0.18)',
-  },
-  progressFill: {
-    width: '34%',
-    height: '100%',
-    borderRadius: 2,
-    backgroundColor: color.accent,
+    left: 0,
+    right: 0,
+    top: '50%',
+    marginTop: -6,
+    textAlign: 'center',
+    fontFamily: font.regular,
+    fontSize: 9.5,
+    letterSpacing: 1.6,
+    color: color.neutral600,
   },
   titleRow: {
     flexDirection: 'row',

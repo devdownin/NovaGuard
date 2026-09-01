@@ -5,6 +5,7 @@ import { color, font } from '../theme';
 import { useAppState } from '../state/AppStateContext';
 import { useAutoZoom } from '../camera/useAutoZoom';
 import { uprightBoxToViewBox } from '../camera/framing';
+import { formatDuration } from '../utils/date';
 import { GridOverlay } from './GridOverlay';
 import { CameraFeed } from './CameraFeed';
 
@@ -51,8 +52,8 @@ function RecDot() {
 export function Viewfinder() {
   const {
     monitoring, det, tracks, primaryTrackId, frameAspect, recSec, clock, perms, settings,
+    recording, recError, cameraRef,
   } = useAppState();
-  const recording = !!det;
 
   const [size, setSize] = useState({ width: 0, height: 0 });
   const onLayout = useCallback((e: LayoutChangeEvent) => {
@@ -115,6 +116,7 @@ export function Viewfinder() {
           viewWidth={size.width}
           viewHeight={size.height}
           onFrame={autoZoom.submitFrame}
+          cameraRef={cameraRef}
         />
 
         {size.width > 0 && tracks.map(track => {
@@ -155,7 +157,7 @@ export function Viewfinder() {
         <View style={styles.recChip}>
           <RecDot />
           <Text style={styles.recLabel}>REC</Text>
-          <Text style={styles.recClock}>{'00:' + String(recSec).padStart(2, '0')}</Text>
+          <Text style={styles.recClock}>{formatDuration(recSec)}</Text>
         </View>
       )}
 
@@ -164,6 +166,12 @@ export function Viewfinder() {
           <Text style={styles.zoomChipText}>
             {autoZoom.phase === 'face' ? 'ZOOM VISAGE' : 'PLAN LARGE'}
           </Text>
+        </View>
+      )}
+
+      {recError && (
+        <View style={styles.errorChip} pointerEvents="none">
+          <Text style={styles.errorText}>{recError}</Text>
         </View>
       )}
 
@@ -338,6 +346,24 @@ const styles = StyleSheet.create({
     fontSize: 9.5,
     letterSpacing: 1.1,
     color: color.accent300,
+  },
+  errorChip: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 34,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(22,24,38,0.86)',
+    borderWidth: 1,
+    borderColor: color.accent700,
+  },
+  errorText: {
+    fontFamily: font.regular,
+    fontSize: 10.5,
+    color: color.accent300,
+    textAlign: 'center',
   },
   clockText: {
     position: 'absolute',

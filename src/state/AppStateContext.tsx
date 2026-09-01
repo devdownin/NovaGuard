@@ -1,19 +1,26 @@
 import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
 } from 'react';
-import { useCameraPermission } from 'react-native-vision-camera';
+import type { Camera as VisionCamera } from 'react-native-vision-camera';
+import { useCameraPermission, useMicrophonePermission } from 'react-native-vision-camera';
 import {
   Camera, DetectionEvent, DetectionKind, ExpandedSections, HistoryFilter, InfoPanel,
-  MaxDuration, OnboardingStep, Period, Permissions, PostRoll, PreRoll, Quality,
-  Retention, Sensitivity, Settings, Tab,
+  MaxDuration, OnboardingStep, Period, Permissions, PostRoll, Quality,
+  Retention, Sensitivity, Settings, StorageInfo, Tab,
 } from './types';
 import {
   defaultDetToday, defaultEvents, defaultLastDet, defaultSettings, defaultSimulatedPermissions,
 } from './defaults';
-import { storage } from './storage';
-import { daysAgo, formatClock, formatMo, pad } from '../utils/date';
+import { dropStaleKeys, storage } from './storage';
+import { daysAgo, formatClock, pad } from '../utils/date';
 import { DetectionBox, FrameDetection } from '../ml/types';
 import { confirmedTracks, primaryTrack, Track, updateTracks } from '../ml/tracker';
+import { Clip, useRecorder } from '../recording/useRecorder';
+import {
+  bytesToReclaim, eventsToReclaim, expiredEvents, MIN_FREE_BYTES, postRollMs, sameDay,
+  todayCount, totalBytes,
+} from '../recording/library';
+import { deleteFiles, orphanedRecordings, storageInfo } from '../recording/videoStore';
 
 interface AppStateValue {
   hydrated: boolean;
@@ -37,6 +44,13 @@ interface AppStateValue {
   clock: string;
   detToday: number;
   lastDet: string;
+  /** True only while a clip is actually being written to disk. */
+  recording: boolean;
+  /** Last recording failure, surfaced in the viewfinder instead of being swallowed. */
+  recError: string | null;
+  storage: StorageInfo;
+  /** Passed down to the Camera so the recorder can drive it. */
+  cameraRef: React.RefObject<VisionCamera | null>;
   toggleMonitoring: () => void;
   /** Called from the camera frame-processor (JS thread) with this frame's qualifying detections. */
   reportDetections: (detections: FrameDetection[], frameAspect: number) => void;
@@ -73,7 +87,6 @@ interface AppStateValue {
   toggleAutoZoom: () => void;
   setSensitivity: (s: Sensitivity) => void;
   setThreshold: (v: number) => void;
-  cyclePre: () => void;
   cyclePost: () => void;
   cycleMax: () => void;
   cycleQuality: () => void;
@@ -106,7 +119,6 @@ function cycle<T>(options: readonly T[], current: T): T {
 }
 
 const CAMERA_OPTIONS: Camera[] = ['Arrière (1×)', 'Arrière (0,5×)', 'Avant'];
-const PRE_OPTIONS: PreRoll[] = ['0 s', '3 s', '5 s'];
 const POST_OPTIONS: PostRoll[] = ['5 s', '10 s', '30 s'];
 const MAX_OPTIONS: MaxDuration[] = ['1 min', '2 min', '5 min'];
 const QUALITY_OPTIONS: Quality[] = ['720p', '1080p', '4K'];
@@ -132,6 +144,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [clock, setClock] = useState(() => formatClock(new Date()));
   const [detToday, setDetToday] = useState(defaultDetToday);
   const [lastDet, setLastDet] = useState(defaultLastDet);
+  const [recError, setRecError] = useState<string | null>(null);
+  const [store, setStore] = useState<StorageInfo>({ used: 0, free: 0, total: 0 });
 
   const [events, setEvents] = useState<DetectionEvent[]>(defaultEvents);
   const [filter, setFilter] = useState<HistoryFilter>('Toutes');
@@ -149,12 +163,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [onb, setOnb] = useState<OnboardingStep>(null);
   const [simPerms, setSimPerms] = useState(defaultSimulatedPermissions);
   const cameraPermission = useCameraPermission();
+  const microphonePermission = useMicrophonePermission();
 
   const perms: Permissions = useMemo(() => ({
     cam: cameraPermission.hasPermission,
-    mic: simPerms.mic,
+    mic: microphonePermission.hasPermission,
     notif: simPerms.notif,
-  }), [cameraPermission.hasPermission, simPerms]);
+  }), [cameraPermission.hasPermission, microphonePermission.hasPermission, simPerms]);
 
   // ── hydrate from disk ────────────────────────────────────────────────
   useEffect(() => {
@@ -172,10 +187,16 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       if (s) setSettings(s);
       if (p) setSimPerms(p);
       if (ev) setEvents(ev);
-      if (typeof dt === 'number') setDetToday(dt);
+      setDetToday(todayCount(dt, Date.now()));
       if (ld) setLastDet(ld);
       setOnb(onboarded ? null : 'intro');
       setHydrated(true);
+
+      // Clips left behind by a crash between the encoder closing a file and the
+      // event being written would otherwise take up space nothing accounts for.
+      const orphans = await orphanedRecordings((ev ?? []).map(e => e.path));
+      if (orphans.length) await deleteFiles(orphans);
+      await dropStaleKeys();
     })();
     return () => { cancelled = true; };
   }, []);
@@ -184,25 +205,29 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { if (hydrated) storage.saveSettings(settings); }, [hydrated, settings]);
   useEffect(() => { if (hydrated) storage.savePerms(simPerms); }, [hydrated, simPerms]);
   useEffect(() => { if (hydrated) storage.saveEvents(events); }, [hydrated, events]);
-  useEffect(() => { if (hydrated) storage.saveDetToday(detToday); }, [hydrated, detToday]);
+  useEffect(() => {
+    if (hydrated) storage.saveDetToday({ count: detToday, day: Date.now() });
+  }, [hydrated, detToday]);
   useEffect(() => { if (hydrated) storage.saveLastDet(lastDet); }, [hydrated, lastDet]);
 
   // ── live clock, independent of monitoring ───────────────────────────
+  const dayRef = useRef(Date.now());
   useEffect(() => {
-    const iv = setInterval(() => setClock(formatClock(new Date())), 1000);
+    const iv = setInterval(() => {
+      const now = Date.now();
+      setClock(formatClock(new Date(now)));
+      // Roll the daily counter over at midnight for a session left running
+      // overnight — hydration alone would only catch it on the next launch.
+      if (!sameDay(dayRef.current, now)) {
+        dayRef.current = now;
+        setDetToday(0);
+      }
+    }, 1000);
     return () => clearInterval(iv);
   }, []);
 
-  // ── detection: fed by the camera's frame processor ──────────────────
-  const pushEvent = useCallback((kind: DetectionKind, dur: number, c: number) => {
-    const hm = pad(new Date().getHours()) + ':' + pad(new Date().getMinutes());
-    setDetToday(v => v + 1);
-    setLastDet(hm);
-    setEvents(evs => [
-      { id: Date.now(), kind, timestamp: Date.now(), dur, conf: c, size: formatMo(dur) },
-      ...evs,
-    ]);
-  }, []);
+  // ── recording ────────────────────────────────────────────────────────
+  const cameraRef = useRef<VisionCamera | null>(null);
 
   // Active-session bookkeeping. Refs (not state) because reportDetections
   // fires many times a second and only some updates should trigger a render.
@@ -210,17 +235,102 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const sessionStartRef = useRef(0);
   const sessionMaxConfRef = useRef(0);
   const tracksRef = useRef<Track[]>([]);
+  /** Set while a stop is in flight, so the arriving clip knows what it belongs to. */
+  const pendingRef = useRef<{ kind: DetectionKind; dur: number; conf: number } | null>(null);
+  /** Post-roll: keep rolling for a moment after the last subject leaves. */
+  const postRollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const endSession = useCallback(() => {
-    const kind = sessionKindRef.current;
-    if (!kind) return;
-    const dur = Math.max(1, Math.round((Date.now() - sessionStartRef.current) / 1000));
-    pushEvent(kind, dur, Math.round(sessionMaxConfRef.current * 100));
+  const commitEvent = useCallback((
+    kind: DetectionKind, dur: number, c: number, clip: Clip | null,
+  ) => {
+    const now = Date.now();
+    setDetToday(v => v + 1);
+    setLastDet(pad(new Date(now).getHours()) + ':' + pad(new Date(now).getMinutes()));
+    setEvents(evs => [
+      {
+        id: now,
+        kind,
+        timestamp: now,
+        // Prefer the encoder's own duration: it counts what is actually in the
+        // file, including the post-roll, which our session timer does not.
+        dur: clip && clip.duration > 0 ? Math.round(clip.duration) : dur,
+        conf: c,
+        path: clip ? clip.path : null,
+        bytes: clip ? clip.bytes : 0,
+      },
+      ...evs,
+    ]);
+  }, []);
+
+  const clearSession = useCallback(() => {
     sessionKindRef.current = null;
     setDet(null);
     setBox(null);
     setRecSec(0);
-  }, [pushEvent]);
+  }, []);
+
+  const sessionMeta = useCallback(() => ({
+    kind: sessionKindRef.current as DetectionKind,
+    dur: Math.max(1, Math.round((Date.now() - sessionStartRef.current) / 1000)),
+    conf: Math.round(sessionMaxConfRef.current * 100),
+  }), []);
+
+  const onClip = useCallback((clip: Clip) => {
+    const pending = pendingRef.current;
+    pendingRef.current = null;
+    if (pending) {
+      commitEvent(pending.kind, pending.dur, pending.conf, clip);
+      return;
+    }
+    // No pending stop: the duration cap cut the clip while the subject is still
+    // in frame. Close this segment — the next frame reopens a session, so a long
+    // passage is stored as consecutive clips rather than one unbounded file.
+    if (sessionKindRef.current != null) {
+      const meta = sessionMeta();
+      commitEvent(meta.kind, meta.dur, meta.conf, clip);
+      clearSession();
+    }
+  }, [clearSession, commitEvent, sessionMeta]);
+
+  const recorder = useRecorder({
+    cameraRef,
+    enabled: monitoring && perms.cam,
+    max: settings.max,
+    onClip,
+    onError: setRecError,
+  });
+  // Depend on the two callbacks rather than the recorder object: it is a fresh
+  // literal every render, and `reportDetections` feeds the frame processor's
+  // dependency list — an identity that churned every render would rebuild the
+  // worklet several times a second.
+  const { isRecording, start: startRecording, stop: stopRecording } = recorder;
+
+  // Same reason: free space changes whenever the library is re-measured, and
+  // reading it through a ref keeps `reportDetections` stable across those.
+  const freeSpaceRef = useRef(0);
+  useEffect(() => { freeSpaceRef.current = store.free; }, [store.free]);
+
+  const cancelPostRoll = useCallback(() => {
+    if (postRollRef.current) {
+      clearTimeout(postRollRef.current);
+      postRollRef.current = null;
+    }
+  }, []);
+
+  /** Ends the session now, without waiting out the post-roll. */
+  const endSession = useCallback(() => {
+    if (sessionKindRef.current == null) return;
+    cancelPostRoll();
+    const meta = sessionMeta();
+    clearSession();
+    if (stopRecording()) {
+      pendingRef.current = meta;    // the clip will carry the event
+    } else {
+      // Nothing was recording (no permission, disk full, camera gone). The
+      // sighting still happened, so keep it — just without a file.
+      commitEvent(meta.kind, meta.dur, meta.conf, null);
+    }
+  }, [cancelPostRoll, clearSession, commitEvent, sessionMeta, stopRecording]);
 
   const reportDetections = useCallback((detections: FrameDetection[], aspect: number) => {
     setFrameAspect(aspect);
@@ -234,11 +344,21 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     setPrimaryTrackId(primary ? primary.id : null);
 
     if (primary) {
+      cancelPostRoll();
       if (sessionKindRef.current == null) {
         sessionKindRef.current = primary.kind;
         sessionStartRef.current = Date.now();
         sessionMaxConfRef.current = primary.maxConfidence;
         setRecSec(0);
+        // Refuse to start on a nearly full volume rather than letting the
+        // encoder fail mid-clip and lose the whole passage.
+        const free = freeSpaceRef.current;
+        if (free > 0 && free < MIN_FREE_BYTES) {
+          setRecError('Espace insuffisant pour enregistrer');
+        } else {
+          setRecError(null);
+          startRecording();
+        }
       } else {
         sessionMaxConfRef.current = Math.max(sessionMaxConfRef.current, primary.maxConfidence);
         setRecSec(Math.floor((Date.now() - sessionStartRef.current) / 1000));
@@ -249,21 +369,65 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // No confirmed subject left in frame: the tracker has already given each one
-    // its grace period, so this is the end of the passage.
-    if (sessionKindRef.current != null) endSession();
-  }, [endSession]);
+    // No confirmed subject left in frame. The tracker has already given each one
+    // its grace period; the post-roll now keeps the camera rolling a little
+    // longer so the clip doesn't cut the moment someone steps out of frame.
+    if (sessionKindRef.current != null && postRollRef.current == null) {
+      postRollRef.current = setTimeout(() => {
+        postRollRef.current = null;
+        endSession();
+      }, postRollMs(settings.post));
+    }
+  }, [cancelPostRoll, endSession, settings.post, startRecording]);
 
   const toggleMonitoring = useCallback(() => {
-    setMonitoring(m => {
-      if (m) {
-        endSession();
-        tracksRef.current = [];
-        setTracks([]);
+    // Closing the session has to happen outside the updater: React may invoke
+    // an updater twice, which would commit the same event — and its clip — twice.
+    if (monitoring) {
+      endSession();
+      tracksRef.current = [];
+      setTracks([]);
+    }
+    setMonitoring(m => !m);
+  }, [endSession, monitoring]);
+
+  useEffect(() => cancelPostRoll, [cancelPostRoll]);
+
+  // ── retention & disk pressure ────────────────────────────────────────
+  // Runs whenever the library changes: drops clips past the retention window,
+  // then — if auto-delete is on and the volume is nearly full — the oldest
+  // clips until there is room again. Both prune `events`, which re-runs this
+  // effect until there is nothing left to drop.
+  useEffect(() => {
+    if (!hydrated) return;
+    let cancelled = false;
+
+    (async () => {
+      const expired = expiredEvents(events, settings.retention, Date.now());
+      if (expired.length) {
+        const ids = new Set(expired.map(e => e.id));
+        await deleteFiles(expired.map(e => e.path));
+        if (!cancelled) setEvents(evs => evs.filter(e => !ids.has(e.id)));
+        return;
       }
-      return !m;
-    });
-  }, [endSession]);
+
+      const info = await storageInfo(totalBytes(events));
+      if (cancelled) return;
+      setStore(info);
+
+      if (!settings.autoDel || info.free <= 0) return;
+      const needed = bytesToReclaim(info.free);
+      if (needed <= 0) return;
+
+      const victims = eventsToReclaim(events, needed);
+      if (!victims.length) return;
+      const ids = new Set(victims.map(e => e.id));
+      await deleteFiles(victims.map(e => e.path));
+      if (!cancelled) setEvents(evs => evs.filter(e => !ids.has(e.id)));
+    })();
+
+    return () => { cancelled = true; };
+  }, [hydrated, events, settings.retention, settings.autoDel]);
 
   // ── history ──────────────────────────────────────────────────────────
   const togglePeriodOpen = useCallback(() => setPeriodOpen(v => !v), []);
@@ -272,14 +436,20 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const askDelete = useCallback(() => setConfirmDelete(true), []);
   const cancelDelete = useCallback(() => setConfirmDelete(false), []);
   const doDelete = useCallback(() => {
+    const victim = events.find(e => e.id === selected);
+    if (victim) deleteFiles([victim.path]);
     setEvents(evs => evs.filter(e => e.id !== selected));
     setSelected(null);
     setConfirmDelete(false);
-  }, [selected]);
+  }, [events, selected]);
 
   const askWipe = useCallback(() => setConfirmWipe(true), []);
   const cancelWipe = useCallback(() => setConfirmWipe(false), []);
-  const doWipe = useCallback(() => { setEvents([]); setConfirmWipe(false); }, []);
+  const doWipe = useCallback(() => {
+    deleteFiles(events.map(e => e.path));
+    setEvents([]);
+    setConfirmWipe(false);
+  }, [events]);
   const wipeAllVideos = askWipe;
 
   // ── setup ────────────────────────────────────────────────────────────
@@ -292,7 +462,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const cycleCamera = useCallback(() => patchSettings({ camera: cycle(CAMERA_OPTIONS, settings.camera) }), [patchSettings, settings.camera]);
-  const cyclePre = useCallback(() => patchSettings({ pre: cycle(PRE_OPTIONS, settings.pre) }), [patchSettings, settings.pre]);
   const cyclePost = useCallback(() => patchSettings({ post: cycle(POST_OPTIONS, settings.post) }), [patchSettings, settings.post]);
   const cycleMax = useCallback(() => patchSettings({ max: cycle(MAX_OPTIONS, settings.max) }), [patchSettings, settings.max]);
   const cycleQuality = useCallback(() => patchSettings({ quality: cycle(QUALITY_OPTIONS, settings.quality) }), [patchSettings, settings.quality]);
@@ -327,27 +496,34 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       cameraPermission.requestPermission();
       return;
     }
+    if (key === 'mic') {
+      microphonePermission.requestPermission();
+      return;
+    }
     setSimPerms(p => ({ ...p, [key]: true }));
-  }, [cameraPermission]);
+  }, [cameraPermission, microphonePermission]);
 
   const value = useMemo<AppStateValue>(() => ({
     hydrated,
     tab, setTab,
-    monitoring, det, conf, box, tracks, primaryTrackId, frameAspect, recSec, clock, detToday, lastDet, toggleMonitoring, reportDetections,
+    monitoring, det, conf, box, tracks, primaryTrackId, frameAspect, recSec, clock, detToday, lastDet,
+    recording: isRecording, recError, storage: store, cameraRef,
+    toggleMonitoring, reportDetections,
     events, filter, setFilter, period, setPeriod, periodOpen, togglePeriodOpen, selected, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete,
     confirmWipe, askWipe, cancelWipe, doWipe,
     settings, toggleSection, cycleCamera, toggleBoot, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom,
-    setSensitivity, setThreshold, cyclePre, cyclePost, cycleMax, cycleQuality, setRetention,
+    setSensitivity, setThreshold, cyclePost, cycleMax, cycleQuality, setRetention,
     toggleAutoDel, toggleNotif, toggleNotifDet, toggleSound, toggleVibe, wipeAllVideos,
     info, openInfo, closeInfo,
     onb, perms, onbNext, onbFinish, grantPermission,
   }), [
-    hydrated, tab, monitoring, det, conf, box, tracks, primaryTrackId, frameAspect, recSec, clock, detToday, lastDet, toggleMonitoring, reportDetections,
+    hydrated, tab, monitoring, det, conf, box, tracks, primaryTrackId, frameAspect, recSec, clock, detToday, lastDet,
+    isRecording, recError, store, toggleMonitoring, reportDetections,
     events, filter, period, periodOpen, togglePeriodOpen, selected, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete, confirmWipe, askWipe, cancelWipe, doWipe,
     settings, toggleSection, cycleCamera, toggleBoot, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom,
-    setSensitivity, setThreshold, cyclePre, cyclePost, cycleMax, cycleQuality, setRetention,
+    setSensitivity, setThreshold, cyclePost, cycleMax, cycleQuality, setRetention,
     toggleAutoDel, toggleNotif, toggleNotifDet, toggleSound, toggleVibe, wipeAllVideos,
     info, openInfo, closeInfo, onb, perms, onbNext, onbFinish, grantPermission,
   ]);

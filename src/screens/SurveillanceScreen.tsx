@@ -2,10 +2,11 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { color, font } from '../theme';
 import { useAppState } from '../state/AppStateContext';
+import { formatBytes } from '../recording/library';
 import { Viewfinder } from '../components/Viewfinder';
 
 export function SurveillanceScreen() {
-  const { monitoring, toggleMonitoring, lastDet, detToday } = useAppState();
+  const { monitoring, toggleMonitoring, lastDet, detToday, storage: store } = useAppState();
 
   return (
     <View style={styles.screen}>
@@ -59,7 +60,7 @@ export function SurveillanceScreen() {
           </View>
           <View style={styles.statCell}>
             <Text style={styles.statLabel}>Espace</Text>
-            <Text style={styles.statValue}>24,8 Go</Text>
+            <Text style={styles.statValue}>{formatBytes(store.free)}</Text>
           </View>
         </View>
       </View>

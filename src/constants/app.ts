@@ -16,6 +16,8 @@ export const THIRD_PARTY_LICENSES: ThirdPartyLicense[] = [
   { name: 'react-native-fast-tflite', note: 'Inférence TensorFlow Lite embarquée', license: 'MIT' },
   { name: 'react-native-vision-camera-face-detector', note: 'Détection de visages (ML Kit)', license: 'MIT' },
   { name: 'vision-camera-resize-plugin', note: 'Redimensionnement des frames caméra', license: 'MIT' },
+  { name: '@dr.pogodin/react-native-fs', note: 'Fichiers vidéo et espace disque', license: 'MIT' },
+  { name: 'react-native-video', note: 'Lecture des enregistrements', license: 'MIT' },
   { name: 'react-native-worklets-core', note: 'Traitement des frames hors thread JS', license: 'MIT' },
   { name: 'EfficientDet-Lite0 (COCO)', note: 'Modèle de détection embarqué', license: 'Apache-2.0' },
   { name: 'react-native-safe-area-context', note: 'Zones sûres de l’écran', license: 'MIT' },

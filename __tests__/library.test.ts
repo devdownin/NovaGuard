@@ -1,0 +1,153 @@
+import {
+  bytesToReclaim, eventsToReclaim, expiredEvents, formatBytes, LOW_SPACE_BYTES,
+  maxDurationMs, postRollMs, qualityBitRate, qualityResolution, retentionDays,
+  sameDay, todayCount, totalBytes,
+} from '../src/recording/library';
+import { DetectionEvent } from '../src/state/types';
+
+const MB = 1024 * 1024;
+
+function ev(id: number, daysBack: number, bytes = 10 * MB): DetectionEvent {
+  const d = new Date();
+  d.setDate(d.getDate() - daysBack);
+  d.setHours(12, 0, 0, 0);
+  return {
+    id, kind: 'Personne', timestamp: d.getTime(), dur: 12, conf: 90,
+    path: `/clips/${id}.mp4`, bytes,
+  };
+}
+
+describe('formatBytes', () => {
+  it('uses French decimal separators', () => {
+    expect(formatBytes(1.5 * MB)).toBe('1,5 Mo');
+    expect(formatBytes(2.5 * 1024 * MB)).toBe('2,5 Go');
+  });
+
+  it('drops decimals once megabytes get large enough not to need them', () => {
+    expect(formatBytes(14.4 * MB)).toBe('14 Mo');
+  });
+
+  it('never renders a negative or nonsense size', () => {
+    expect(formatBytes(0)).toBe('0 Mo');
+    expect(formatBytes(-5)).toBe('0 Mo');
+    expect(formatBytes(NaN)).toBe('0 Mo');
+  });
+});
+
+describe('setting translations', () => {
+  it('maps every retention option, with "Toujours" meaning no expiry', () => {
+    expect(retentionDays('1 jour')).toBe(1);
+    expect(retentionDays('7 jours')).toBe(7);
+    expect(retentionDays('30 jours')).toBe(30);
+    expect(retentionDays('90 jours')).toBe(90);
+    expect(retentionDays('Toujours')).toBeNull();
+  });
+
+  it('maps durations to milliseconds', () => {
+    expect(maxDurationMs('1 min')).toBe(60_000);
+    expect(maxDurationMs('5 min')).toBe(300_000);
+    expect(postRollMs('5 s')).toBe(5_000);
+    expect(postRollMs('30 s')).toBe(30_000);
+  });
+
+  it('gives each quality a distinct resolution and bitrate', () => {
+    expect(qualityResolution('720p')).toEqual({ width: 1280, height: 720 });
+    expect(qualityResolution('4K')).toEqual({ width: 3840, height: 2160 });
+    const rates = (['720p', '1080p', '4K'] as const).map(qualityBitRate);
+    expect(new Set(rates).size).toBe(3);
+    expect(rates[0]).toBeLessThan(rates[2]);
+  });
+});
+
+describe('expiredEvents', () => {
+  const now = Date.now();
+
+  it('keeps everything when retention is "Toujours"', () => {
+    expect(expiredEvents([ev(1, 400)], 'Toujours', now)).toEqual([]);
+  });
+
+  it('drops only what falls outside the window', () => {
+    const events = [ev(1, 0), ev(2, 3), ev(3, 10), ev(4, 40)];
+    const expired = expiredEvents(events, '7 jours', now);
+    expect(expired.map(e => e.id)).toEqual([3, 4]);
+  });
+
+  it('measures from the start of the day, so "1 jour" keeps today', () => {
+    const expired = expiredEvents([ev(1, 0), ev(2, 1)], '1 jour', now);
+    expect(expired.map(e => e.id)).toEqual([2]);
+  });
+});
+
+describe('eventsToReclaim', () => {
+  it('returns nothing when no space is needed', () => {
+    expect(eventsToReclaim([ev(1, 5)], 0)).toEqual([]);
+    expect(eventsToReclaim([ev(1, 5)], -1)).toEqual([]);
+  });
+
+  it('takes the oldest clips first and stops once the target is met', () => {
+    const events = [ev(1, 0, 10 * MB), ev(2, 5, 10 * MB), ev(3, 9, 10 * MB)];
+    const picked = eventsToReclaim(events, 15 * MB);
+    expect(picked.map(e => e.id)).toEqual([3, 2]);
+  });
+
+  it('skips events with no file, which would free nothing', () => {
+    const withFile = ev(1, 1, 10 * MB);
+    const noFile: DetectionEvent = { ...ev(2, 9), path: null, bytes: 0 };
+    expect(eventsToReclaim([withFile, noFile], 5 * MB).map(e => e.id)).toEqual([1]);
+  });
+
+  it('gives back everything it has when that still is not enough', () => {
+    const events = [ev(1, 1, MB), ev(2, 2, MB)];
+    expect(eventsToReclaim(events, 500 * MB)).toHaveLength(2);
+  });
+});
+
+describe('bytesToReclaim', () => {
+  it('asks for nothing while there is room', () => {
+    expect(bytesToReclaim(LOW_SPACE_BYTES + MB)).toBe(0);
+  });
+
+  it('asks for the shortfall below the low-space mark', () => {
+    expect(bytesToReclaim(LOW_SPACE_BYTES - 20 * MB)).toBe(20 * MB);
+  });
+});
+
+describe('totalBytes', () => {
+  it('sums real sizes and ignores fileless events', () => {
+    const noFile: DetectionEvent = { ...ev(9, 1), path: null, bytes: 0 };
+    expect(totalBytes([ev(1, 1, 3 * MB), ev(2, 2, 4 * MB), noFile])).toBe(7 * MB);
+  });
+});
+
+describe('todayCount', () => {
+  const noon = new Date(2026, 0, 15, 12, 0, 0).getTime();
+
+  it('starts from zero with nothing stored', () => {
+    expect(todayCount(null, noon)).toBe(0);
+  });
+
+  it('keeps the count within the same day', () => {
+    const morning = new Date(2026, 0, 15, 8, 0, 0).getTime();
+    expect(todayCount({ count: 4, day: morning }, noon)).toBe(4);
+  });
+
+  it('resets once the day has changed — the bug that made it a lifetime total', () => {
+    const yesterday = new Date(2026, 0, 14, 23, 59, 0).getTime();
+    expect(todayCount({ count: 41, day: yesterday }, noon)).toBe(0);
+  });
+
+  it('resets across a year boundary', () => {
+    const lastYear = new Date(2025, 11, 31, 23, 0, 0).getTime();
+    const newYear = new Date(2026, 0, 1, 1, 0, 0).getTime();
+    expect(todayCount({ count: 7, day: lastYear }, newYear)).toBe(0);
+  });
+});
+
+describe('sameDay', () => {
+  it('separates days, not 24-hour spans', () => {
+    const late = new Date(2026, 4, 3, 23, 55).getTime();
+    const early = new Date(2026, 4, 4, 0, 5).getTime();
+    expect(sameDay(late, early)).toBe(false);
+    expect(sameDay(late, new Date(2026, 4, 3, 0, 1).getTime())).toBe(true);
+  });
+});

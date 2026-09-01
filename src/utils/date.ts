@@ -38,6 +38,11 @@ export function formatClock(d: Date): string {
   );
 }
 
-export function formatMo(dur: number): string {
-  return (dur * 0.8).toFixed(1).replace('.', ',') + ' Mo';
+/**
+ * "0:18" / "2:05". Clips can now run to the configured maximum (up to 5 min),
+ * so seconds have to carry over instead of being padded straight onto "0:".
+ */
+export function formatDuration(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  return Math.floor(total / 60) + ':' + pad(total % 60);
 }
