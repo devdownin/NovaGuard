@@ -117,7 +117,8 @@
       return s.mode === 'away' ? 'All zones active' : 'Perimeter active · interior ignored';
     }
     var open = s.sensors.filter(S.isTripped).length;
-    return open ? open + ' sensor' + (open > 1 ? 's' : '') + ' need attention' : 'All sensors resting';
+    if (!open) return 'All sensors resting';
+    return open + (open > 1 ? ' sensors need' : ' sensor needs') + ' attention';
   }
 
   function renderHero(s) {
@@ -141,16 +142,19 @@
 
     if (s.status === 'alarm') {
       kids.push(el('div', { class: 'sn-hero__actions' }, [
-        el('button', { class: 'n-btn n-btn--danger', text: 'Dismiss', onclick: dismissAlarm }),
         el('button', {
-          class: 'n-btn n-btn--ghost', text: 'Call help',
+          class: 'n-btn n-btn--danger', 'data-action': 'dismiss',
+          text: 'Dismiss', onclick: dismissAlarm
+        }),
+        el('button', {
+          class: 'n-btn n-btn--ghost', 'data-action': 'call-help', text: 'Call help',
           onclick: function () { log('system', 'Emergency contacts called'); }
         })
       ]));
     } else if (s.status === 'arming') {
       kids.push(el('div', { class: 'sn-hero__actions' }, [
         el('button', {
-          class: 'n-btn n-btn--ghost', text: 'Cancel',
+          class: 'n-btn n-btn--ghost', 'data-action': 'cancel-arming', text: 'Cancel',
           onclick: function () { setMode('off'); }
         })
       ]));
@@ -224,7 +228,7 @@
     var head = [el('h2', { class: 'n-section__title', text: title })];
     if (action) {
       head.push(el('button', {
-        class: 'n-section__action', type: 'button',
+        class: 'n-section__action', type: 'button', 'data-action': action.id,
         text: action.label, onclick: action.onClick
       }));
     }
@@ -244,7 +248,10 @@
       ]),
       el('div', { class: 'sn-event__body' }, [
         el('div', { class: 'sn-event__text', text: ev.text }),
-        el('div', { class: 'sn-event__at', text: S.relativeTime(ev.at, now) })
+        el('div', {
+          class: 'sn-event__at', 'data-at': String(ev.at),
+          text: S.relativeTime(ev.at, now)
+        })
       ])
     ]);
   }
@@ -261,6 +268,8 @@
         el('div', { class: 'sn-cam__name', text: cam.name }),
         el('div', {
           class: 'sn-cam__meta',
+          'data-at': live ? String(cam.lastMotion) : null,
+          'data-at-prefix': live ? 'Motion ' : null,
           text: live ? 'Motion ' + S.relativeTime(cam.lastMotion, now) : 'Offline'
         })
       ])
@@ -284,7 +293,7 @@
     ));
 
     kids.push(section('Recent activity',
-      { label: 'See all', onClick: function () { setTab('events'); } },
+      { id: 'see-all', label: 'See all', onClick: function () { setTab('events'); } },
       el('div', { class: 'sn-events' }, s.events.slice(0, 3).map(function (e) {
         return renderEvent(e, now);
       }))
@@ -328,7 +337,11 @@
     return [
       section('System', null,
         el('div', { class: 'sn-set' }, rows.map(function (r) {
-          return el('div', { class: 'sn-set__row', role: 'button', tabindex: '0' }, [
+          return el('button', {
+            class: 'sn-set__row',
+            type: 'button',
+            'data-set': r.label.toLowerCase().replace(/\s+/g, '-')
+          }, [
             el('span', { class: 'sn-set__label', text: r.label }),
             el('span', { class: 'sn-set__value', text: r.value }),
             el('span', { html: icon('chevron', { size: 15 }) })
@@ -351,61 +364,158 @@
      Mount + render
      ====================================================================== */
 
+  /* Controls carry a stable identity so focus can be put back after a
+     re-render. Without this every state change strands keyboard users on
+     <body>. */
+  var FOCUS_KEYS = ['data-tab', 'data-mode', 'data-sensor', 'data-set', 'data-action'];
+
+  function focusSelector(node) {
+    if (!node || !node.getAttribute) return null;
+    for (var i = 0; i < FOCUS_KEYS.length; i++) {
+      var key = FOCUS_KEYS[i];
+      if (node.hasAttribute(key)) {
+        return '[' + key + '="' + node.getAttribute(key) + '"]';
+      }
+    }
+    return null;
+  }
+
+  /* What assistive tech should hear when the system changes state. Only
+     transitions are announced — narrating every countdown tick would be
+     unusable. */
+  function announcement(s) {
+    if (s.status === 'alarm')  return 'Alarm. ' + heroSub(s);
+    if (s.status === 'armed')  return 'Armed. ' + heroSub(s);
+    if (s.status === 'arming') return 'Arming. Exit delay started.';
+    return 'System disarmed.';
+  }
+
+  /* Relative timestamps go stale on their own; refreshing them in place is
+     far cheaper than rebuilding the screen, and it cannot steal focus. */
+  function refreshTimes(root) {
+    var now = Date.now();
+    var nodes = root.querySelectorAll('[data-at]');
+    for (var i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
+      node.textContent = (node.getAttribute('data-at-prefix') || '') +
+        S.relativeTime(Number(node.getAttribute('data-at')), now);
+    }
+  }
+
   function boot(root) {
-    var tabbar = el('nav', { class: 'sn-tabbar', role: 'tablist' });
+    var tabbar = el('nav', {
+      class: 'sn-tabbar', role: 'tablist', 'aria-label': 'Sections'
+    });
     var frame = global.IOSFrame.mount(root, { footer: tabbar });
 
     var app = el('div', { class: 'sn' });
     frame.body.appendChild(app);
 
+    /* The header never changes, so it is built once and left alone. */
+    app.appendChild(el('header', { class: 'sn-header' }, [
+      el('div', {}, [
+        el('p', { class: 'sn-header__eyebrow', text: store.get().property }),
+        el('h1', { class: 'sn-header__title', text: 'Sentinelle' })
+      ]),
+      el('button', {
+        class: 'sn-header__btn', type: 'button', 'aria-label': 'Settings',
+        'data-action': 'settings',
+        html: icon('gear', { size: 18 }),
+        onclick: function () { setTab('settings'); }
+      })
+    ]));
+
+    var live = el('div', {
+      class: 'n-sr-only', role: 'status',
+      'aria-live': 'assertive', 'aria-atomic': 'true'
+    });
+    app.appendChild(live);
+
+    var panel = el('div', { id: 'sn-panel', role: 'tabpanel', tabindex: '-1' });
+    app.appendChild(panel);
+
+    var announced = null;
+
     function render(s) {
       var now = Date.now();
       var scroll = frame.body.scrollTop;
+      var refocus = focusSelector(document.activeElement);
 
-      /* --- header + tab content --- */
-      app.innerHTML = '';
-      app.appendChild(el('header', { class: 'sn-header' }, [
-        el('div', {}, [
-          el('p', { class: 'sn-header__eyebrow', text: s.property }),
-          el('h1', { class: 'sn-header__title', text: 'Sentinelle' })
-        ]),
-        el('button', {
-          class: 'sn-header__btn', type: 'button', 'aria-label': 'Settings',
-          html: icon('gear', { size: 18 }),
-          onclick: function () { setTab('settings'); }
-        })
-      ]));
+      panel.innerHTML = '';
+      panel.setAttribute('aria-labelledby', 'sn-tab-' + s.tab);
+      (VIEWS[s.tab] || tabHome)(s, now).forEach(function (n) { panel.appendChild(n); });
 
-      (VIEWS[s.tab] || tabHome)(s, now).forEach(function (n) { app.appendChild(n); });
-
-      /* --- tab bar --- */
       tabbar.innerHTML = '';
       TABS.forEach(function (t) {
+        var selected = s.tab === t.id;
         var kids = [
           el('span', { html: icon(t.icon, { size: 21 }) }),
           el('span', { text: t.label })
         ];
         if (t.id === 'events' && unseen > 0) {
-          kids.splice(1, 0, el('span', { class: 'sn-tab__badge', text: String(unseen) }));
+          kids.splice(1, 0, el('span', {
+            class: 'sn-tab__badge',
+            'aria-label': unseen + ' unseen events',
+            text: String(unseen)
+          }));
         }
         tabbar.appendChild(el('button', {
           class: 'sn-tab',
           type: 'button',
           role: 'tab',
+          id: 'sn-tab-' + t.id,
           'data-tab': t.id,
-          'aria-selected': String(s.tab === t.id),
+          'aria-controls': 'sn-panel',
+          'aria-selected': String(selected),
+          /* Roving tabindex: one stop for the whole tablist. */
+          tabindex: selected ? '0' : '-1',
           onclick: function () { setTab(t.id); }
         }, kids));
       });
 
+      /* Announce state transitions, not every render. */
+      var next = announcement(s);
+      if (next !== announced) {
+        announced = next;
+        live.textContent = next;
+      }
+
       frame.body.scrollTop = scroll;
+
+      if (refocus) {
+        var target = app.querySelector(refocus) || tabbar.querySelector(refocus);
+        if (target) target.focus();
+      }
     }
+
+    /* A tablist owes its users arrow-key navigation. */
+    tabbar.addEventListener('keydown', function (e) {
+      var step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+      var index = -1;
+
+      if (step) {
+        for (var i = 0; i < TABS.length; i++) {
+          if (TABS[i].id === store.get().tab) index = i;
+        }
+        index = (index + step + TABS.length) % TABS.length;
+      } else if (e.key === 'Home') {
+        index = 0;
+      } else if (e.key === 'End') {
+        index = TABS.length - 1;
+      } else {
+        return;
+      }
+
+      e.preventDefault();
+      setTab(TABS[index].id);
+      var moved = tabbar.querySelector('[data-tab="' + TABS[index].id + '"]');
+      if (moved) moved.focus();
+    });
 
     store.subscribe(render);
     render(store.get());
 
-    /* Keep relative timestamps fresh. */
-    setInterval(function () { render(store.get()); }, 30000);
+    setInterval(function () { refreshTimes(app); }, 30000);
   }
 
   document.addEventListener('DOMContentLoaded', function () {

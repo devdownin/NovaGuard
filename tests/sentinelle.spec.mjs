@@ -37,6 +37,17 @@ test.describe('Sentinelle', () => {
     expect(errors).toEqual([]);
   });
 
+  test('the sensor summary agrees in number', async ({ page }) => {
+    await openApp(page);
+    await expect(page.locator('.sn-hero__sub')).toHaveText('All sensors resting');
+
+    await sensorRow(page, 'Garage Door').click();
+    await expect(page.locator('.sn-hero__sub')).toHaveText('1 sensor needs attention');
+
+    await sensorRow(page, 'Back Window').click();
+    await expect(page.locator('.sn-hero__sub')).toHaveText('2 sensors need attention');
+  });
+
   test('every tab renders its own content', async ({ page }) => {
     const errors = await openApp(page);
 

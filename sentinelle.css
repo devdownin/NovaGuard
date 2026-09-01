@@ -299,12 +299,16 @@
 .sn-set { display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
 .sn-set__row {
   display: flex;
+  width: 100%;
   align-items: center;
   gap: 12px;
   padding: 15px 16px;
+  border: 0;
   background: var(--n-surface);
   color: var(--n-text);
+  font-family: inherit;
   font-size: 15px;
+  text-align: left;
   cursor: pointer;
 }
 .sn-set__row:first-child { border-radius: var(--n-r-md) var(--n-r-md) 0 0; }

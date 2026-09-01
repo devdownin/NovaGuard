@@ -93,7 +93,7 @@ PLAYWRIGHT_CHROMIUM_PATH=/path/to/chrome npm test
 pull requests into `main`: `npm ci`, then lint, then the Playwright suite on
 Chromium. A failing run uploads the Playwright HTML report as an artifact.
 
-The suite covers the behaviour that is easy to break silently:
+`tests/sentinelle.spec.mjs` covers behaviour that is easy to break silently:
 
 - the disarmed screen renders and the page logs no console errors
 - all four tabs render their own content
@@ -103,9 +103,58 @@ The suite covers the behaviour that is easy to break silently:
 - **Home mode ignores interior motion but still arms the perimeter**
 - **smoke alarms even while the system is disarmed**
 - the Activity tab badges unseen events and clears them on view
+- the sensor summary agrees in number
 
-The last two are the domain rules most likely to regress unnoticed, since
+The two in bold are the domain rules most likely to regress unnoticed, since
 neither is visible from the default screen.
+
+`tests/a11y.spec.mjs` runs axe-core over every tab and over the alarm state,
+and asserts the keyboard and screen-reader behaviour described below.
+
+## Accessibility
+
+The screen re-renders its whole panel on every state change, which is cheap
+at this size but has two consequences that are handled explicitly:
+
+- **Focus is restored after each render.** Controls carry a stable identity
+  (`data-tab`, `data-mode`, `data-sensor`, `data-set`, `data-action`), and
+  the renderer puts focus back where it was. Without this, every state change
+  drops keyboard users onto `<body>`.
+- **The 30s heartbeat does not re-render.** It only rewrites the text of
+  `[data-at]` nodes, so stale relative timestamps refresh without rebuilding
+  the DOM or disturbing focus.
+
+Also:
+
+- The system state is announced through an `aria-live="assertive"` region, on
+  transitions only — narrating each countdown tick would be unusable. For a
+  security app, the alarm is the one thing that must reach everyone.
+- The tab bar implements the full tablist pattern: `aria-controls` onto a
+  single `role="tabpanel"`, roving tabindex, and Arrow/Home/End navigation.
+- Settings rows are real `<button>` elements. They were `<div role="button"
+  tabindex="0">` with no key handler, which promises an interaction that does
+  not exist.
+- `:focus-visible` draws an accent outline; the browser default is close to
+  invisible on these surfaces.
+
+### Palette and contrast
+
+Three tokens were adjusted to clear WCAG AA, and the values are load-bearing
+rather than decorative:
+
+| Token | Was | Now | Why |
+|---|---|---|---|
+| `--n-text-3` | `#5D6980` | `#7F8A9E` | measured 3.0–3.6:1 on the surfaces it sits on; now 4.84:1 at worst |
+| `--n-armed-dim` | `#14603F` | `#115234` | backs `--n-armed` as chip text; 4.28:1 → 5.21:1 |
+| `--n-danger-dim` | `#6E1A2C` | `#551220` | backs `--n-danger` as chip text; 3.82:1 → 4.73:1 |
+
+Raising `--n-text-3` compresses the grey scale against `--n-text-2`
+(`#97A3BC`), which now sit 1.37:1 apart. That is a deliberate trade of
+hierarchy for legibility, and worth revisiting against the real design.
+
+Note that axe never flagged `--n-armed-dim`: the `.n-chip--armed` variant is
+defined but not currently rendered, so nothing put it on screen to be
+scanned. A scanner only sees what you render.
 
 Selectors use `data-mode`, `data-tab` and `data-sensor` rather than labels, so
 copy changes do not break the suite.
