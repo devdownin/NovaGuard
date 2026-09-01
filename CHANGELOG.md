@@ -12,6 +12,8 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et ce p
 - Permission caméra réelle (demandée depuis l'onboarding et Setup → Confidentialité, au lieu d'être simulée).
 - Sélection du device caméra (avant/arrière, tentative grand-angle pour « Arrière (0,5×) ») et sensibilité de détection reliées aux vrais réglages.
 - Workflow CI (GitHub Actions) : types, lint et tests sur chaque push/pull request vers `main`.
+- Icône d'application (Android adaptive + legacy, iOS) remplaçant l'icône par défaut de React Native.
+- Écran de démarrage animé (viseur pulsant, marque, trois piliers du produit, illustration de maison la nuit) affiché pendant l'hydratation de l'état.
 
 ### Modifié
 - Renommage du projet « Sentinelle » → **NovaGuard** (nom affiché, `applicationId` Android `com.novaguard`, dépôt, clés de stockage local).
