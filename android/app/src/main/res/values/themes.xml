@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.Sentinelle" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:statusBarColor">@color/n_bg</item>
+        <item name="android:navigationBarColor">@color/n_bg</item>
+        <item name="android:windowBackground">@color/n_bg</item>
+        <item name="android:colorAccent">@color/n_accent</item>
+        <item name="android:textColorPrimary">@color/n_text</item>
+    </style>
+</resources>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  An alarm panel is a device on the local network, typically reached over
+  plain HTTP. Cleartext is permitted so the app can talk to it; TLS is used
+  whenever the configured address is https.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

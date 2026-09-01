@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">Sentinelle</string>
+
+    <string name="setup_title">Connect to your panel</string>
+    <string name="setup_body">Enter the address of the Sentinelle panel on your network.</string>
+    <string name="setup_hint">192.168.1.20:8787</string>
+    <string name="setup_connect">Connect</string>
+
+    <string name="error_title">Cannot reach the panel</string>
+    <string name="error_retry">Try again</string>
+    <string name="error_change">Change address</string>
+</resources>

@@ -1,0 +1,12 @@
+<resources>
+    <!-- Mirrors the nocturne tokens in ds/nocturne/styles.css so the native
+         shell and the web UI do not disagree at the seams. -->
+    <color name="n_bg">#FF070910</color>
+    <color name="n_surface">#FF0F1420</color>
+    <color name="n_surface_2">#FF161D2C</color>
+    <color name="n_border">#FF232D42</color>
+    <color name="n_text">#FFE9EDF6</color>
+    <color name="n_text_2">#FF97A3BC</color>
+    <color name="n_text_3">#FF7F8A9E</color>
+    <color name="n_accent">#FF5B8CFF</color>
+</resources>

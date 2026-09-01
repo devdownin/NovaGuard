@@ -5,6 +5,10 @@
    toolchain, so this is the same component as a plain factory. Swap it for
    the React version once a build step exists.
 
+   In a real app the device chrome must not render at all — the OS draws its
+   own status bar. Pass { bare: true } (the Android shell requests it with
+   ?frame=none) to get just the screen, filling the viewport.
+
    Exposes: window.IOSFrame.mount(root, opts) -> { body, setTime }
    =========================================================================== */
 (function (global) {
@@ -28,6 +32,20 @@
     ]);
 
     var body = el('div', { class: 'ios__body' });
+
+    if (opts.bare) {
+      var plain = el('div', { class: 'ios__screen ios__screen--bare' }, [
+        body,
+        opts.footer || null
+      ]);
+      root.appendChild(plain);
+      return {
+        body: body,
+        screen: plain,
+        setTime: function () {},
+        destroy: function () { root.removeChild(plain); }
+      };
+    }
 
     var screen = el('div', { class: 'ios__screen' }, [
       el('div', { class: 'ios__island' }),

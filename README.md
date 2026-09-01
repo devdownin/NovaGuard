@@ -227,6 +227,49 @@ Note that the design's `support.js` is a canvas support file, unrelated to the
 `support.js` here, which is the client's API layer. Do not let the import
 overwrite it.
 
+## Android app
+
+`android/` is a Gradle project that wraps the client in a WebView.
+
+The WebView points straight at the panel, which serves the client, so
+everything is same-origin — no bundled copy of the UI that could drift out of
+step with the panel it talks to. The trade is that there is no UI without the
+panel. For an alarm display that is the honest behaviour: a cached screen
+would show a state nobody can vouch for.
+
+- **First run** asks for the panel address (`192.168.1.20:8787` and
+  `https://panel.home` are both accepted) and stores it.
+- **The device frame is not drawn.** The shell loads `?frame=none`, which
+  tells the client to skip the mock iOS chrome — Android draws the real status
+  bar. Safe-area insets are honoured.
+- **An unreachable panel shows an explicit failure**, not a blank WebView,
+  with retry and change-address actions.
+- **The panel address lives in the client's Settings tab**, via a small
+  JavaScript bridge, so the app keeps one settings surface rather than adding
+  native chrome above a UI that already has a header.
+- Cleartext HTTP is permitted, because an alarm panel is a device on the local
+  network. TLS is used whenever the configured address is `https`.
+
+### Building
+
+The APK is built by CI and uploaded as the `sentinelle-apk` artifact on every
+run — debug and release both. Locally:
+
+```sh
+cd android && ./gradlew assembleDebug
+```
+
+That needs the Android SDK; the environment this was written in could not
+reach `dl.google.com`, so the Android build has only ever run in CI.
+
+The release build is signed **with the debug key** so CI can produce something
+installable. Replace `signingConfig` in `app/build.gradle.kts` with a real
+keystore before distributing anything.
+
+Note that the design this client was based on is an **iOS** frame, while the
+app is Android. That may simply be how the mockup was drawn, but it is worth
+confirming against the real design.
+
 ## Stubs
 
 Camera tiles are placeholders — there is no video pipeline. `Call help`

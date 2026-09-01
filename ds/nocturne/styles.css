@@ -288,3 +288,24 @@
 .ios__btn--up     { left: -3px; top: 186px;  height: 58px; }
 .ios__btn--down   { left: -3px; top: 256px;  height: 58px; }
 .ios__btn--power  { right: -3px; top: 210px; height: 92px; }
+
+/* --- bare mode: no device chrome, the OS provides it -------------------- */
+
+.ios__screen--bare {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  /* Keep content clear of the system status bar and gesture bar. */
+  padding-top: env(safe-area-inset-top);
+}
+
+.ios__screen--bare .sn-tabbar {
+  padding-bottom: calc(9px + env(safe-area-inset-bottom));
+}
+
+.stage:has(.ios__screen--bare) {
+  padding: 0;
+  display: block;
+}

@@ -318,13 +318,25 @@
       { label: 'Notifications', value: 'All events' },
       { label: 'Emergency contacts', value: '3' }
     ];
+
+    /* Inside the Android shell the panel address is an app-level setting, but
+       it belongs in the one settings surface the user already knows. */
+    if (global.SentinelleHost && global.SentinelleHost.changePanel) {
+      rows.unshift({
+        label: 'Panel address',
+        value: 'Change',
+        onClick: function () { global.SentinelleHost.changePanel(); }
+      });
+    }
+
     return [
       section('System', null,
         el('div', { class: 'sn-set' }, rows.map(function (r) {
           return el('button', {
             class: 'sn-set__row',
             type: 'button',
-            'data-set': r.label.toLowerCase().replace(/\s+/g, '-')
+            'data-set': r.label.toLowerCase().replace(/\s+/g, '-'),
+            onclick: r.onClick || null
           }, [
             el('span', { class: 'sn-set__label', text: r.label }),
             el('span', { class: 'sn-set__value', text: r.value }),
@@ -399,7 +411,10 @@
     var tabbar = el('nav', {
       class: 'sn-tabbar', role: 'tablist', 'aria-label': 'Sections'
     });
-    var frame = global.IOSFrame.mount(root, { footer: tabbar });
+    /* The device frame is a presentation device for the design canvas. Inside
+       a real app it must not render — the OS draws the status bar. */
+    var bare = /[?&]frame=none\b/.test(global.location.search);
+    var frame = global.IOSFrame.mount(root, { footer: tabbar, bare: bare });
 
     var app = el('div', { class: 'sn' });
     frame.body.appendChild(app);

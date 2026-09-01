@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/n_bg">
+
+    <WebView
+        android:id="@+id/web"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/n_bg" />
+
+    <!-- First run, and whenever the address needs changing. -->
+    <LinearLayout
+        android:id="@+id/setup"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/n_bg"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="28dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/setup_title"
+            android:textColor="@color/n_text"
+            android:textSize="24sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/setup_body"
+            android:textColor="@color/n_text_2"
+            android:textSize="15sp" />
+
+        <EditText
+            android:id="@+id/address"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:autofillHints="none"
+            android:background="@color/n_surface_2"
+            android:hint="@string/setup_hint"
+            android:importantForAutofill="no"
+            android:inputType="textUri"
+            android:padding="15dp"
+            android:textColor="@color/n_text"
+            android:textColorHint="@color/n_text_3"
+            android:textSize="16sp" />
+
+        <Button
+            android:id="@+id/connect"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:backgroundTint="@color/n_accent"
+            android:text="@string/setup_connect"
+            android:textAllCaps="false"
+            android:textColor="@color/n_text"
+            android:textSize="16sp" />
+    </LinearLayout>
+
+    <!-- A blank WebView is the worst thing to show when a security panel is
+         unreachable, so an explicit failure takes its place. -->
+    <LinearLayout
+        android:id="@+id/error"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/n_bg"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="28dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/error_title"
+            android:textColor="@color/n_text"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/errorDetail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textColor="@color/n_text_2"
+            android:textSize="15sp" />
+
+        <Button
+            android:id="@+id/retry"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:backgroundTint="@color/n_accent"
+            android:text="@string/error_retry"
+            android:textAllCaps="false"
+            android:textColor="@color/n_text"
+            android:textSize="16sp" />
+
+        <Button
+            android:id="@+id/changeAddress"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:backgroundTint="@color/n_surface_2"
+            android:text="@string/error_change"
+            android:textAllCaps="false"
+            android:textColor="@color/n_text"
+            android:textSize="16sp" />
+    </LinearLayout>
+</FrameLayout>
