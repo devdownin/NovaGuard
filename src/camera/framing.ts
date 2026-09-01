@@ -35,20 +35,38 @@ export function unionBox(boxes: DetectionBox[]): DetectionBox | null {
 }
 
 /**
- * Converts a box normalized to the model's centered square crop into a box
- * normalized to the viewfinder rect — the same mapping the detection overlay
- * uses, so the zoom always frames exactly what the box draws.
+ * Converts a box normalized to the (uprighted) camera frame into a box
+ * normalized to the viewfinder rect.
+ *
+ * The preview renders with `resizeMode="cover"`, so the frame is scaled until
+ * it covers the view and the excess on the long axis is cropped evenly at both
+ * ends — this reproduces exactly that, which is why the overlay and the zoom
+ * always agree with what is actually on screen.
  */
-export function squareBoxToViewBox(box: DetectionBox, viewW: number, viewH: number): DetectionBox {
-  if (viewW <= 0 || viewH <= 0) return box;
-  const side = Math.min(viewW, viewH);
-  const offX = (viewW - side) / 2;
-  const offY = (viewH - side) / 2;
+export function uprightBoxToViewBox(
+  box: DetectionBox,
+  frameAspect: number,
+  viewW: number,
+  viewH: number,
+): DetectionBox {
+  if (viewW <= 0 || viewH <= 0 || frameAspect <= 0) return box;
+  const ratio = frameAspect / (viewW / viewH);
+
+  if (ratio > 1) {
+    // Frame is wider than the view: full height shown, sides cropped.
+    return {
+      x: (box.x - 0.5) * ratio + 0.5,
+      y: box.y,
+      width: box.width * ratio,
+      height: box.height,
+    };
+  }
+  // Frame is taller than the view: full width shown, top and bottom cropped.
   return {
-    x: (offX + box.x * side) / viewW,
-    y: (offY + box.y * side) / viewH,
-    width: (box.width * side) / viewW,
-    height: (box.height * side) / viewH,
+    x: box.x,
+    y: (box.y - 0.5) / ratio + 0.5,
+    width: box.width,
+    height: box.height / ratio,
   };
 }
 

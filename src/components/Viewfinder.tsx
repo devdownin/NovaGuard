@@ -4,6 +4,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import { color, font } from '../theme';
 import { useAppState } from '../state/AppStateContext';
 import { useAutoZoom } from '../camera/useAutoZoom';
+import { uprightBoxToViewBox } from '../camera/framing';
 import { GridOverlay } from './GridOverlay';
 import { CameraFeed } from './CameraFeed';
 
@@ -48,7 +49,9 @@ function RecDot() {
 }
 
 export function Viewfinder() {
-  const { monitoring, det, conf, box, recSec, clock, perms, settings } = useAppState();
+  const {
+    monitoring, det, tracks, primaryTrackId, frameAspect, recSec, clock, perms, settings,
+  } = useAppState();
   const recording = !!det;
 
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -56,13 +59,6 @@ export function Viewfinder() {
     const { width, height } = e.nativeEvent.layout;
     setSize({ width, height });
   }, []);
-  // The model sees a center-cropped SQUARE of the frame (vision-camera-resize-plugin's
-  // default crop for a square target size) — the detection box is normalized to that
-  // square, so it must be positioned within the matching centered square of the view,
-  // not the full (usually taller-than-wide) viewfinder rect.
-  const squareSize = Math.min(size.width, size.height);
-  const squareOffsetX = (size.width - squareSize) / 2;
-  const squareOffsetY = (size.height - squareSize) / 2;
 
   const autoZoom = useAutoZoom({
     enabled: monitoring && settings.autoZoom,
@@ -121,29 +117,31 @@ export function Viewfinder() {
           onFrame={autoZoom.submitFrame}
         />
 
-        {box && squareSize > 0 && (
-          <View
-            style={[styles.detectionLayer, { left: squareOffsetX, top: squareOffsetY, width: squareSize, height: squareSize }]}
-            pointerEvents="none"
-          >
+        {size.width > 0 && tracks.map(track => {
+          const viewBox = uprightBoxToViewBox(track.box, frameAspect, size.width, size.height);
+          const isPrimary = track.id === primaryTrackId;
+          return (
             <View
+              key={track.id}
+              pointerEvents="none"
               style={[
                 styles.detBox,
+                isPrimary ? styles.detBoxPrimary : styles.detBoxSecondary,
                 {
-                  left: `${box.x * 100}%`,
-                  top: `${box.y * 100}%`,
-                  width: `${box.width * 100}%`,
-                  height: `${box.height * 100}%`,
+                  left: `${viewBox.x * 100}%`,
+                  top: `${viewBox.y * 100}%`,
+                  width: `${viewBox.width * 100}%`,
+                  height: `${viewBox.height * 100}%`,
                 },
               ]}
             >
-              <View style={styles.detLabelChip}>
-                <Text style={styles.detLabelText}>{det}</Text>
-                <Text style={styles.detConfText}>{conf} %</Text>
+              <View style={[styles.detLabelChip, !isPrimary && styles.detLabelChipSecondary]}>
+                <Text style={styles.detLabelText}>{track.kind}</Text>
+                <Text style={styles.detConfText}>{Math.round(track.confidence * 100)} %</Text>
               </View>
             </View>
-          </View>
-        )}
+          );
+        })}
       </Animated.View>
 
       {monitoring && <ScanBeam />}
@@ -227,14 +225,18 @@ const styles = StyleSheet.create({
     right: 0,
     height: 70,
   },
-  detectionLayer: {
-    position: 'absolute',
-  },
   detBox: {
     position: 'absolute',
+    borderRadius: 6,
+  },
+  detBoxPrimary: {
     borderWidth: 1.5,
     borderColor: color.accent,
-    borderRadius: 6,
+  },
+  // Extra subjects stay visible without competing with the one driving the recording.
+  detBoxSecondary: {
+    borderWidth: 1,
+    borderColor: color.accent700,
   },
   detLabelChip: {
     position: 'absolute',
@@ -249,6 +251,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(22,24,38,0.82)',
     borderWidth: 1,
     borderColor: color.accent700,
+  },
+  detLabelChipSecondary: {
+    opacity: 0.75,
   },
   detLabelText: {
     fontFamily: font.medium,

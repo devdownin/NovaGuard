@@ -13,6 +13,7 @@ import {
 import { storage } from './storage';
 import { daysAgo, formatClock, formatMo, pad } from '../utils/date';
 import { DetectionBox, FrameDetection } from '../ml/types';
+import { confirmedTracks, primaryTrack, Track, updateTracks } from '../ml/tracker';
 
 interface AppStateValue {
   hydrated: boolean;
@@ -26,13 +27,19 @@ interface AppStateValue {
   det: DetectionKind | null;
   conf: number;
   box: DetectionBox | null;
+  /** Every confirmed subject currently in frame, for the overlay. */
+  tracks: Track[];
+  /** Which of those tracks is driving the recording session. */
+  primaryTrackId: number | null;
+  /** Aspect ratio (w/h) of the uprighted camera frame, for mapping boxes onto the preview. */
+  frameAspect: number;
   recSec: number;
   clock: string;
   detToday: number;
   lastDet: string;
   toggleMonitoring: () => void;
   /** Called from the camera frame-processor (JS thread) with this frame's qualifying detections. */
-  reportDetections: (detections: FrameDetection[]) => void;
+  reportDetections: (detections: FrameDetection[], frameAspect: number) => void;
 
   // history
   events: DetectionEvent[];
@@ -104,9 +111,10 @@ const POST_OPTIONS: PostRoll[] = ['5 s', '10 s', '30 s'];
 const MAX_OPTIONS: MaxDuration[] = ['1 min', '2 min', '5 min'];
 const QUALITY_OPTIONS: Quality[] = ['720p', '1080p', '4K'];
 
-// How many consecutive empty frame reports end an active detection session.
-// At the frame processor's throttled rate (1–5 fps, see settings.sens) this is roughly 1–3s.
-const MISS_LIMIT = 3;
+// Sessions now follow the tracker: one opens when a subject is *confirmed*
+// (seen on consecutive frames) and closes when every track has been dropped,
+// which is what stops a single lucky frame from writing a history event and
+// stops a brief occlusion from splitting one passage into two.
 
 export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
@@ -117,6 +125,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [det, setDet] = useState<DetectionKind | null>(null);
   const [conf, setConf] = useState(0);
   const [box, setBox] = useState<DetectionBox | null>(null);
+  const [tracks, setTracks] = useState<Track[]>([]);
+  const [primaryTrackId, setPrimaryTrackId] = useState<number | null>(null);
+  const [frameAspect, setFrameAspect] = useState(9 / 16);
   const [recSec, setRecSec] = useState(0);
   const [clock, setClock] = useState(() => formatClock(new Date()));
   const [detToday, setDetToday] = useState(defaultDetToday);
@@ -198,7 +209,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const sessionKindRef = useRef<DetectionKind | null>(null);
   const sessionStartRef = useRef(0);
   const sessionMaxConfRef = useRef(0);
-  const missStreakRef = useRef(0);
+  const tracksRef = useRef<Track[]>([]);
 
   const endSession = useCallback(() => {
     const kind = sessionKindRef.current;
@@ -206,42 +217,50 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     const dur = Math.max(1, Math.round((Date.now() - sessionStartRef.current) / 1000));
     pushEvent(kind, dur, Math.round(sessionMaxConfRef.current * 100));
     sessionKindRef.current = null;
-    missStreakRef.current = 0;
     setDet(null);
     setBox(null);
     setRecSec(0);
   }, [pushEvent]);
 
-  const reportDetections = useCallback((detections: FrameDetection[]) => {
-    const best = detections[0];
+  const reportDetections = useCallback((detections: FrameDetection[], aspect: number) => {
+    setFrameAspect(aspect);
 
-    if (best && (sessionKindRef.current == null || sessionKindRef.current === best.kind)) {
-      missStreakRef.current = 0;
+    const next = updateTracks(tracksRef.current, detections, Date.now());
+    tracksRef.current = next;
+    const visible = confirmedTracks(next);
+    setTracks(visible);
+
+    const primary = primaryTrack(next);
+    setPrimaryTrackId(primary ? primary.id : null);
+
+    if (primary) {
       if (sessionKindRef.current == null) {
-        sessionKindRef.current = best.kind;
+        sessionKindRef.current = primary.kind;
         sessionStartRef.current = Date.now();
-        sessionMaxConfRef.current = best.confidence;
+        sessionMaxConfRef.current = primary.maxConfidence;
         setRecSec(0);
       } else {
-        sessionMaxConfRef.current = Math.max(sessionMaxConfRef.current, best.confidence);
+        sessionMaxConfRef.current = Math.max(sessionMaxConfRef.current, primary.maxConfidence);
         setRecSec(Math.floor((Date.now() - sessionStartRef.current) / 1000));
       }
-      setDet(best.kind);
-      setConf(Math.round(best.confidence * 100));
-      setBox(best.box);
+      setDet(primary.kind);
+      setConf(Math.round(primary.confidence * 100));
+      setBox(primary.box);
       return;
     }
 
-    // Nothing matching this frame (or a different kind while one is already active): count a miss.
-    if (sessionKindRef.current != null) {
-      missStreakRef.current += 1;
-      if (missStreakRef.current >= MISS_LIMIT) endSession();
-    }
+    // No confirmed subject left in frame: the tracker has already given each one
+    // its grace period, so this is the end of the passage.
+    if (sessionKindRef.current != null) endSession();
   }, [endSession]);
 
   const toggleMonitoring = useCallback(() => {
     setMonitoring(m => {
-      if (m) endSession();
+      if (m) {
+        endSession();
+        tracksRef.current = [];
+        setTracks([]);
+      }
       return !m;
     });
   }, [endSession]);
@@ -314,7 +333,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AppStateValue>(() => ({
     hydrated,
     tab, setTab,
-    monitoring, det, conf, box, recSec, clock, detToday, lastDet, toggleMonitoring, reportDetections,
+    monitoring, det, conf, box, tracks, primaryTrackId, frameAspect, recSec, clock, detToday, lastDet, toggleMonitoring, reportDetections,
     events, filter, setFilter, period, setPeriod, periodOpen, togglePeriodOpen, selected, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete,
     confirmWipe, askWipe, cancelWipe, doWipe,
@@ -324,7 +343,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     info, openInfo, closeInfo,
     onb, perms, onbNext, onbFinish, grantPermission,
   }), [
-    hydrated, tab, monitoring, det, conf, box, recSec, clock, detToday, lastDet, toggleMonitoring, reportDetections,
+    hydrated, tab, monitoring, det, conf, box, tracks, primaryTrackId, frameAspect, recSec, clock, detToday, lastDet, toggleMonitoring, reportDetections,
     events, filter, period, periodOpen, togglePeriodOpen, selected, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete, confirmWipe, askWipe, cancelWipe, doWipe,
     settings, toggleSection, cycleCamera, toggleBoot, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom,

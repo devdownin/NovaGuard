@@ -4,17 +4,19 @@ import {
   Camera, runAsync, runAtTargetFps, useCameraDevice, useFrameProcessor,
 } from 'react-native-vision-camera';
 import { useResizePlugin } from 'vision-camera-resize-plugin';
-import { useTensorflowModel } from 'react-native-fast-tflite';
 import { useFaceDetector } from 'react-native-vision-camera-face-detector';
 import { useRunOnJS } from 'react-native-worklets-core';
 import { useAppState } from '../state/AppStateContext';
 import { devicePositionFor, physicalDeviceFilterFor } from '../camera/deviceSelection';
-import { squareBoxToViewBox } from '../camera/framing';
+import { uprightAspect, uprightRotation } from '../camera/orientation';
+import { uprightBoxToViewBox } from '../camera/framing';
+import { useDetectionModel } from '../camera/useDetectionModel';
 import { interpretDetections } from '../ml/interpretDetections';
 import { DetectionBox, FrameDetection } from '../ml/types';
 
-const MODEL = require('../../assets/models/coco-ssd-mobilenet-v1.tflite');
-const MODEL_INPUT_SIZE = 300;
+const MODEL = require('../../assets/models/efficientdet-lite0.tflite');
+/** EfficientDet-Lite0 takes a 320x320 uint8 image (verified against the model file). */
+const MODEL_INPUT_SIZE = 320;
 
 const FPS_BY_SENSITIVITY = { Basse: 1, Moyenne: 3, Haute: 5 } as const;
 
@@ -44,8 +46,7 @@ export function CameraFeed({ style, active, viewWidth, viewHeight, onFrame }: Ca
   );
 
   const { resize } = useResizePlugin();
-  const modelState = useTensorflowModel(MODEL);
-  const model = modelState.state === 'loaded' ? modelState.model : undefined;
+  const { model } = useDetectionModel(MODEL);
 
   // `autoMode` asks the plugin to scale and rotate face bounds natively against
   // the window size we hand it — passing the viewfinder's own size means bounds
@@ -63,12 +64,16 @@ export function CameraFeed({ style, active, viewWidth, viewHeight, onFrame }: Ca
     windowHeight: viewHeight || 1,
   });
 
-  const onJsFrame = useRunOnJS((detections: FrameDetection[], faces: DetectionBox[]) => {
-    reportDetections(detections);
+  const onJsFrame = useRunOnJS((
+    detections: FrameDetection[],
+    faces: DetectionBox[],
+    frameAspect: number,
+  ) => {
+    reportDetections(detections, frameAspect);
     if (!onFrame) return;
     const persons = detections
       .filter(d => d.kind === 'Personne')
-      .map(d => squareBoxToViewBox(d.box, viewWidth, viewHeight));
+      .map(d => uprightBoxToViewBox(d.box, frameAspect, viewWidth, viewHeight));
     onFrame(faces, persons);
   }, [reportDetections, onFrame, viewWidth, viewHeight]);
 
@@ -77,8 +82,8 @@ export function CameraFeed({ style, active, viewWidth, viewHeight, onFrame }: Ca
   const detectAnimal = settings.animal;
   const minConfidence = settings.threshold / 100;
   const autoZoom = settings.autoZoom;
-  const frameW = viewWidth || 1;
-  const frameH = viewHeight || 1;
+  const viewW = viewWidth || 1;
+  const viewH = viewHeight || 1;
 
   const frameProcessor = useFrameProcessor((frame) => {
     'worklet';
@@ -88,8 +93,13 @@ export function CameraFeed({ style, active, viewWidth, viewHeight, onFrame }: Ca
       'worklet';
       runAsync(frame, () => {
         'worklet';
+        // Feed the model the WHOLE frame, uprighted. The previous version let
+        // the plugin centre-crop to a square, which threw away the sides of the
+        // field of view, and left the scene rotated for a portrait-held phone.
         const resized = resize(frame, {
+          crop: { x: 0, y: 0, width: frame.width, height: frame.height },
           scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
+          rotation: uprightRotation(frame.orientation),
           pixelFormat: 'rgb',
           dataType: 'uint8',
         });
@@ -102,19 +112,14 @@ export function CameraFeed({ style, active, viewWidth, viewHeight, onFrame }: Ca
           const detected = detectFaces(frame);
           for (let i = 0; i < detected.length; i++) {
             const b = detected[i].bounds;
-            faces.push({
-              x: b.x / frameW,
-              y: b.y / frameH,
-              width: b.width / frameW,
-              height: b.height / frameH,
-            });
+            faces.push({ x: b.x / viewW, y: b.y / viewH, width: b.width / viewW, height: b.height / viewH });
           }
         }
 
-        onJsFrame(detections, faces);
+        onJsFrame(detections, faces, uprightAspect(frame.width, frame.height, frame.orientation));
       });
     });
-  }, [model, resize, onJsFrame, detectFaces, autoZoom, frameW, frameH, targetFps, detectPerson, detectAnimal, minConfidence]);
+  }, [model, resize, onJsFrame, detectFaces, autoZoom, viewW, viewH, targetFps, detectPerson, detectAnimal, minConfidence]);
 
   if (!perms.cam || device == null) return null;
 
@@ -126,6 +131,7 @@ export function CameraFeed({ style, active, viewWidth, viewHeight, onFrame }: Ca
       frameProcessor={active ? frameProcessor : undefined}
       pixelFormat="yuv"
       resizeMode="cover"
+      lowLightBoost={settings.night && device.supportsLowLightBoost}
     />
   );
 }

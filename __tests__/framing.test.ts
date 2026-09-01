@@ -3,7 +3,7 @@
  */
 
 import {
-  computeFraming, NEUTRAL_FRAMING, padBox, smoothBox, squareBoxToViewBox, unionBox,
+  computeFraming, NEUTRAL_FRAMING, padBox, smoothBox, unionBox,
 } from '../src/camera/framing';
 
 const VIEW_W = 360;
@@ -20,23 +20,6 @@ describe('unionBox', () => {
       { x: 0.5, y: 0.1, width: 0.2, height: 0.4 },
     ]);
     expect(union).toEqual({ x: 0.1, y: 0.1, width: 0.6, height: 0.4 });
-  });
-});
-
-describe('squareBoxToViewBox', () => {
-  it('letterboxes the square crop inside a portrait view', () => {
-    // Portrait view: the square is full width, vertically centred.
-    const box = squareBoxToViewBox({ x: 0, y: 0, width: 1, height: 1 }, VIEW_W, VIEW_H);
-    expect(box.x).toBeCloseTo(0);
-    expect(box.width).toBeCloseTo(1);
-    expect(box.y).toBeCloseTo((VIEW_H - VIEW_W) / 2 / VIEW_H);
-    expect(box.height).toBeCloseTo(VIEW_W / VIEW_H);
-  });
-
-  it('keeps a centred box centred', () => {
-    const box = squareBoxToViewBox({ x: 0.4, y: 0.4, width: 0.2, height: 0.2 }, VIEW_W, VIEW_H);
-    expect(box.x + box.width / 2).toBeCloseTo(0.5);
-    expect(box.y + box.height / 2).toBeCloseTo(0.5);
   });
 });
 
