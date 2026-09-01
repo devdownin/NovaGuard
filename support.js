@@ -1,5 +1,8 @@
 /* ===========================================================================
-   support.js — state store, formatters and seed data for Sentinelle.
+   support.js — formatters, a small store, and the panel API client.
+
+   The domain rules that used to live here now live on the server: the panel
+   decides, this client displays.
    Exposes: window.Support
    =========================================================================== */
 (function (global) {
@@ -42,74 +45,62 @@
     };
   }
 
-  /* --- domain model ---------------------------------------------------
+  /* --- panel API ------------------------------------------------------ */
 
-     A sensor is "tripped" when its state is not its resting state. Contact
-     sensors rest closed, motion sensors rest clear, environmental sensors
-     rest clear. Tripping a perimeter sensor while the system is armed is
-     what raises the alarm.
-     -------------------------------------------------------------------- */
-
-  var RESTING = { contact: 'closed', motion: 'clear', smoke: 'clear', water: 'clear' };
-  var TRIPPED = { contact: 'open', motion: 'motion', smoke: 'smoke', water: 'leak' };
-
-  function isTripped(sensor) { return sensor.state !== RESTING[sensor.type]; }
-
-  /** Motion sensors are ignored in Home mode — that is the point of Home mode. */
-  function armsIn(sensor, mode) {
-    if (sensor.type === 'motion') return mode === 'away';
-    return true;
+  function request(method, path, body) {
+    var opts = { method: method, headers: {} };
+    if (body) {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+    return fetch(path, opts).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (payload) {
+        if (!res.ok) throw new Error(payload.error || res.statusText || 'request failed');
+        return payload;
+      });
+    });
   }
 
-  var MINUTE = 60000;
-  var t0 = Date.now();
+  var api = {
+    state: function () {
+      return request('GET', '/api/state');
+    },
+    setMode: function (mode) {
+      return request('POST', '/api/mode', { mode: mode });
+    },
+    toggleSensor: function (id) {
+      return request('POST', '/api/sensors/' + encodeURIComponent(id) + '/toggle');
+    },
+    dismissAlarm: function () {
+      return request('POST', '/api/alarm/dismiss');
+    },
+    callHelp: function () {
+      return request('POST', '/api/alarm/call-help');
+    },
 
-  function seed() {
-    return {
-      property: 'Rue Lafayette',
-      mode: 'off',            // 'off' | 'home' | 'away'
-      status: 'disarmed',     // 'disarmed' | 'arming' | 'armed' | 'alarm'
-      countdown: 0,
-      tab: 'home',
-      sensors: [
-        { id: 's1', name: 'Front Door',    zone: 'Entry',    type: 'contact', state: 'closed', battery: 92 },
-        { id: 's2', name: 'Garage Door',   zone: 'Perimeter',type: 'contact', state: 'closed', battery: 74 },
-        { id: 's3', name: 'Back Window',   zone: 'Perimeter',type: 'contact', state: 'closed', battery: 12 },
-        { id: 's4', name: 'Living Room',   zone: 'Interior', type: 'motion',  state: 'clear',  battery: 88 },
-        { id: 's5', name: 'Hallway',       zone: 'Interior', type: 'motion',  state: 'clear',  battery: 61 },
-        { id: 's6', name: 'Kitchen Smoke', zone: 'Safety',   type: 'smoke',   state: 'clear',  battery: 97 }
-      ],
-      cameras: [
-        { id: 'c1', name: 'Front Porch', status: 'live',    lastMotion: t0 - 6 * MINUTE },
-        { id: 'c2', name: 'Driveway',    status: 'live',    lastMotion: t0 - 41 * MINUTE },
-        { id: 'c3', name: 'Back Garden', status: 'live',    lastMotion: t0 - 3 * 60 * MINUTE },
-        { id: 'c4', name: 'Garage',      status: 'offline', lastMotion: t0 - 26 * 60 * MINUTE }
-      ],
-      events: [
-        { id: 'e1', kind: 'motion',  text: 'Motion on Front Porch',        at: t0 - 6 * MINUTE },
-        { id: 'e2', kind: 'system',  text: 'System disarmed by Chloé',     at: t0 - 52 * MINUTE },
-        { id: 'e3', kind: 'battery', text: 'Back Window battery low (12%)',at: t0 - 4 * 60 * MINUTE },
-        { id: 'e4', kind: 'system',  text: 'Armed — Away',                 at: t0 - 9 * 60 * MINUTE },
-        { id: 'e5', kind: 'motion',  text: 'Motion on Driveway',           at: t0 - 11 * 60 * MINUTE }
-      ]
-    };
-  }
-
-  var eventSeq = 0;
-  function makeEvent(kind, text) {
-    return { id: 'ev' + (++eventSeq), kind: kind, text: text, at: Date.now() };
-  }
+    /**
+     * Subscribe to panel state. EventSource reconnects on its own; onLink
+     * reports whether what is on screen is currently live.
+     *
+     * A security display that goes stale without saying so is worse than one
+     * that admits it, so connection state is part of the UI.
+     */
+    stream: function (onState, onLink) {
+      var source = new EventSource('/api/stream');
+      source.addEventListener('open', function () { onLink(true); });
+      source.addEventListener('error', function () { onLink(false); });
+      source.addEventListener('message', function (e) {
+        onLink(true);
+        onState(JSON.parse(e.data));
+      });
+      return function () { source.close(); };
+    }
+  };
 
   global.Support = {
     clockTime: clockTime,
     relativeTime: relativeTime,
     createStore: createStore,
-    seed: seed,
-    makeEvent: makeEvent,
-    isTripped: isTripped,
-    armsIn: armsIn,
-    RESTING: RESTING,
-    TRIPPED: TRIPPED,
-    EXIT_DELAY: 10
+    api: api
   };
 })(window);

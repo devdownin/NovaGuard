@@ -33,6 +33,22 @@ export default [
     }
   },
 
+  /* Server code: Node ES modules. */
+  {
+    files: ['server/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'module',
+      globals: globals.node
+    },
+    rules: {
+      ...js.configs.recommended.rules,
+      eqeqeq: ['error', 'smart'],
+      curly: ['error', 'multi-line'],
+      semi: ['error', 'always']
+    }
+  },
+
   /* Playwright specs and config run in Node as ES modules. */
   {
     files: ['tests/**/*.mjs', 'playwright.config.mjs', 'eslint.config.mjs'],

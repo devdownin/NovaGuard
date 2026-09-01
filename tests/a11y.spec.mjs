@@ -1,11 +1,12 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { fileURLToPath } from 'node:url';
 
-const APP = fileURLToPath(new URL('../index.html', import.meta.url));
+test.beforeEach(async ({ request }) => {
+  await request.post('/api/test/reset');
+});
 
 async function openApp(page) {
-  await page.goto(`file://${APP}`);
+  await page.goto('/');
   await page.waitForSelector('.sn-hero');
 }
 
@@ -87,7 +88,6 @@ test('settings rows are real buttons, not divs with a role', async ({ page }) =>
 
 test('focus survives a re-render', async ({ page }) => {
   await openApp(page);
-  await page.evaluate(() => { window.Support.EXIT_DELAY = 1; });
 
   const away = page.locator('.sn-mode[data-mode="away"]');
   await away.focus();

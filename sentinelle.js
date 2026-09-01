@@ -8,92 +8,75 @@
   var S = global.Support;
   var el = N.el, icon = N.icon;
 
-  var store = S.createStore(S.seed());
+  var store = S.createStore({
+    tab: 'home',
+    ready: false,
+    connected: false,
+    error: null,
+    property: '',
+    mode: 'off',
+    status: 'disarmed',
+    countdown: 0,
+    exitDelay: null,
+    sensors: [],
+    cameras: [],
+    events: []
+  });
+
+  /* Unseen events are counted against the newest event the user has actually
+     looked at, so the badge survives server pushes. */
+  var seenEventId = null;
   var unseen = 0;
-  var armTimer = null;
 
-  /* =========================================================================
-     Actions
-     ====================================================================== */
-
-  function log(kind, text) {
-    store.set(function (s) {
-      if (s.tab !== 'events') unseen++;
-      return { events: [S.makeEvent(kind, text)].concat(s.events) };
-    });
+  function markSeen(events) {
+    seenEventId = events.length ? events[0].id : '';
+    unseen = 0;
   }
 
-  function stopArming() {
-    if (armTimer) { clearInterval(armTimer); armTimer = null; }
+  function countUnseen(events) {
+    for (var i = 0; i < events.length; i++) {
+      if (events[i].id === seenEventId) return i;
+    }
+    return events.length;
+  }
+
+  function apply(snapshot) {
+    if (seenEventId === null) {
+      markSeen(snapshot.events);
+    } else if (store.get().tab === 'events') {
+      markSeen(snapshot.events);
+    } else {
+      unseen = countUnseen(snapshot.events);
+    }
+    store.set(Object.assign({}, snapshot, { ready: true, error: null }));
+  }
+
+  /* A rejected command must surface. Silently leaving the screen showing a
+     state the panel never entered is the worst failure mode here. */
+  function command(run) {
+    return run().then(apply).catch(function (err) {
+      store.set({ error: err.message });
+    });
   }
 
   function setMode(mode) {
-    var s = store.get();
-    if (mode === s.mode && s.status !== 'arming') return;
-
-    stopArming();
-
-    if (mode === 'off') {
-      store.set({ mode: 'off', status: 'disarmed', countdown: 0 });
-      log('system', 'System disarmed');
-      return;
-    }
-
-    store.set({ mode: mode, status: 'arming', countdown: S.EXIT_DELAY });
-    armTimer = setInterval(function () {
-      var next = store.get().countdown - 1;
-      if (next > 0) { store.set({ countdown: next }); return; }
-      stopArming();
-      store.set({ status: 'armed', countdown: 0 });
-      log('system', 'Armed — ' + (mode === 'away' ? 'Away' : 'Home'));
-    }, 1000);
+    return command(function () { return S.api.setMode(mode); });
   }
 
   function dismissAlarm() {
-    stopArming();
-    store.set({ status: 'disarmed', mode: 'off', countdown: 0 });
-    log('system', 'Alarm dismissed — system disarmed');
+    return command(function () { return S.api.dismissAlarm(); });
   }
 
-  /**
-   * Tapping a sensor simulates it changing state. If the system is armed and
-   * the sensor participates in the current mode, that is a breach.
-   */
+  function callHelp() {
+    return command(function () { return S.api.callHelp(); });
+  }
+
   function toggleSensor(id) {
-    var s = store.get();
-    var hit = null;
-
-    var sensors = s.sensors.map(function (x) {
-      if (x.id !== id) return x;
-      hit = Object.assign({}, x, {
-        state: S.isTripped(x) ? S.RESTING[x.type] : S.TRIPPED[x.type]
-      });
-      return hit;
-    });
-    store.set({ sensors: sensors });
-    if (!hit) return;
-
-    var tripped = S.isTripped(hit);
-
-    /* Smoke is a life-safety sensor: it alarms whether or not we are armed. */
-    if (tripped && hit.type === 'smoke') {
-      stopArming();
-      store.set({ status: 'alarm', countdown: 0 });
-      log('alarm', 'Smoke detected — ' + hit.name);
-      return;
-    }
-
-    if (tripped && s.status === 'armed' && S.armsIn(hit, s.mode)) {
-      stopArming();
-      store.set({ status: 'alarm', countdown: 0 });
-      log('alarm', 'Breach — ' + hit.name + ' (' + hit.zone + ')');
-    } else if (tripped) {
-      log(hit.type === 'motion' ? 'motion' : 'system', hit.name + ' ' + S.TRIPPED[hit.type]);
-    }
+    return command(function () { return S.api.toggleSensor(id); });
   }
 
   function setTab(tab) {
-    if (tab === 'events') unseen = 0;
+    if (tab === 'events') markSeen(store.get().events);
     store.set({ tab: tab });
   }
 
@@ -116,7 +99,7 @@
     if (s.status === 'armed') {
       return s.mode === 'away' ? 'All zones active' : 'Perimeter active · interior ignored';
     }
-    var open = s.sensors.filter(S.isTripped).length;
+    var open = s.sensors.filter(function (x) { return x.tripped; }).length;
     if (!open) return 'All sensors resting';
     return open + (open > 1 ? ' sensors need' : ' sensor needs') + ' attention';
   }
@@ -148,7 +131,7 @@
         }),
         el('button', {
           class: 'n-btn n-btn--ghost', 'data-action': 'call-help', text: 'Call help',
-          onclick: function () { log('system', 'Emergency contacts called'); }
+          onclick: callHelp
         })
       ]));
     } else if (s.status === 'arming') {
@@ -187,9 +170,10 @@
   }
 
   function renderSensorRow(sensor, s) {
-    var tripped = S.isTripped(sensor);
-    var breach = tripped && s.status === 'alarm' && S.armsIn(sensor, s.mode);
-    var ignored = s.status === 'armed' && !S.armsIn(sensor, s.mode);
+    var tripped = sensor.tripped;
+    var breach = tripped && s.status === 'alarm';
+    /* armedNow is the panel's answer, not a rule re-derived here. */
+    var ignored = sensor.armedNow === false;
 
     var cls = 'sn-row' + (breach ? ' sn-row--breach' : tripped ? ' sn-row--tripped' : '');
 
@@ -328,7 +312,7 @@
   function tabSettings(s) {
     var rows = [
       { label: 'Property', value: s.property },
-      { label: 'Exit delay', value: S.EXIT_DELAY + 's' },
+      { label: 'Exit delay', value: s.exitDelay + 's' },
       { label: 'Entry delay', value: '30s' },
       { label: 'Siren volume', value: 'High' },
       { label: 'Notifications', value: 'All events' },
@@ -364,6 +348,13 @@
      Mount + render
      ====================================================================== */
 
+  function banner(kind, text) {
+    return el('div', { class: 'sn-banner sn-banner--' + kind }, [
+      el('span', { html: icon(kind === 'offline' ? 'off' : 'bell', { size: 18 }) }),
+      el('span', { class: 'sn-banner__text', text: text })
+    ]);
+  }
+
   /* Controls carry a stable identity so focus can be put back after a
      re-render. Without this every state change strands keyboard users on
      <body>. */
@@ -384,6 +375,8 @@
      transitions are announced — narrating every countdown tick would be
      unusable. */
   function announcement(s) {
+    if (!s.ready) return 'Connecting to the panel.';
+    if (!s.connected) return 'Connection to the panel lost. Displayed state may be out of date.';
     if (s.status === 'alarm')  return 'Alarm. ' + heroSub(s);
     if (s.status === 'armed')  return 'Armed. ' + heroSub(s);
     if (s.status === 'arming') return 'Arming. Exit delay started.';
@@ -411,10 +404,12 @@
     var app = el('div', { class: 'sn' });
     frame.body.appendChild(app);
 
-    /* The header never changes, so it is built once and left alone. */
+    var eyebrow = el('p', { class: 'sn-header__eyebrow' });
+
+    /* The header is built once; only the property name is updated. */
     app.appendChild(el('header', { class: 'sn-header' }, [
       el('div', {}, [
-        el('p', { class: 'sn-header__eyebrow', text: store.get().property }),
+        eyebrow,
         el('h1', { class: 'sn-header__title', text: 'Sentinelle' })
       ]),
       el('button', {
@@ -441,9 +436,20 @@
       var scroll = frame.body.scrollTop;
       var refocus = focusSelector(document.activeElement);
 
+      eyebrow.textContent = s.property || '—';
+
       panel.innerHTML = '';
       panel.setAttribute('aria-labelledby', 'sn-tab-' + s.tab);
-      (VIEWS[s.tab] || tabHome)(s, now).forEach(function (n) { panel.appendChild(n); });
+
+      if (!s.ready) {
+        panel.appendChild(el('div', { class: 'sn-empty', text: 'Connecting to the panel…' }));
+      } else {
+        if (!s.connected) {
+          panel.appendChild(banner('offline', 'Not connected to the panel. This may be out of date.'));
+        }
+        if (s.error) panel.appendChild(banner('error', s.error));
+        (VIEWS[s.tab] || tabHome)(s, now).forEach(function (n) { panel.appendChild(n); });
+      }
 
       tabbar.innerHTML = '';
       TABS.forEach(function (t) {
@@ -515,6 +521,15 @@
     store.subscribe(render);
     render(store.get());
 
+    /* One read to paint immediately, then the stream keeps it live. */
+    S.api.state().then(apply).catch(function (err) {
+      store.set({ ready: true, error: 'Cannot reach the panel: ' + err.message });
+    });
+
+    S.api.stream(apply, function (up) {
+      if (store.get().connected !== up) store.set({ connected: up });
+    });
+
     setInterval(function () { refreshTimes(app); }, 30000);
   }
 
@@ -522,5 +537,8 @@
     boot(document.getElementById('frame-root'));
   });
 
-  global.Sentinelle = { store: store, setMode: setMode, toggleSensor: toggleSensor };
+  global.Sentinelle = {
+    store: store, setMode: setMode, toggleSensor: toggleSensor,
+    dismissAlarm: dismissAlarm
+  };
 })(window);

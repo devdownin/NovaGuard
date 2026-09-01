@@ -1,21 +1,18 @@
 import { test, expect } from '@playwright/test';
-import { fileURLToPath } from 'node:url';
 
-const APP = fileURLToPath(new URL('../index.html', import.meta.url));
+/* The suite shares one panel, so each test starts from a known one. */
+test.beforeEach(async ({ request }) => {
+  await request.post('/api/test/reset');
+});
 
 /** Navigate to the app and collect anything the page logs as an error. */
 async function openApp(page) {
   const errors = [];
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
-  await page.goto(`file://${APP}`);
+  await page.goto('/');
   await page.waitForSelector('.sn-hero');
   return errors;
-}
-
-/** Arming normally runs a 10s exit delay; shorten it so tests stay fast. */
-async function setExitDelay(page, seconds) {
-  await page.evaluate((s) => { window.Support.EXIT_DELAY = s; }, seconds);
 }
 
 /* Select chrome by data attribute: the Activity tab's label picks up the
@@ -69,15 +66,14 @@ test.describe('Sentinelle', () => {
 
   test('arming runs an exit delay that can be cancelled', async ({ page }) => {
     await openApp(page);
-    await setExitDelay(page, 5);
 
     await mode(page, 'away').click();
     await expect(page.locator('.sn-hero__label')).toHaveText('Arming…');
     await expect(page.locator('.sn-hero__count')).toBeVisible();
 
     /* The countdown must actually run down, not just render once. */
-    await expect(page.locator('.sn-hero__count')).toHaveText('5s');
-    await expect(page.locator('.sn-hero__count')).toHaveText('3s', { timeout: 4000 });
+    await expect(page.locator('.sn-hero__count')).toHaveText('3s');
+    await expect(page.locator('.sn-hero__count')).toHaveText('1s', { timeout: 4000 });
 
     await page.locator('.sn-hero__actions .n-btn', { hasText: 'Cancel' }).click();
     await expect(page.locator('.sn-hero__label')).toHaveText('Disarmed');
@@ -86,10 +82,9 @@ test.describe('Sentinelle', () => {
 
   test('arming completes and reports the active mode', async ({ page }) => {
     await openApp(page);
-    await setExitDelay(page, 1);
 
     await mode(page, 'away').click();
-    await expect(page.locator('.sn-hero__label')).toHaveText('Armed', { timeout: 5000 });
+    await expect(page.locator('.sn-hero__label')).toHaveText('Armed', { timeout: 8000 });
     await expect(page.locator('.sn-hero__sub')).toHaveText('All zones active');
 
     await tab(page, 'events').click();
@@ -98,10 +93,9 @@ test.describe('Sentinelle', () => {
 
   test('tripping an armed sensor raises the alarm', async ({ page }) => {
     await openApp(page);
-    await setExitDelay(page, 1);
 
     await mode(page, 'away').click();
-    await expect(page.locator('.sn-hero__label')).toHaveText('Armed', { timeout: 5000 });
+    await expect(page.locator('.sn-hero__label')).toHaveText('Armed', { timeout: 8000 });
 
     await sensorRow(page, 'Front Door').click();
 
@@ -116,10 +110,9 @@ test.describe('Sentinelle', () => {
 
   test('dismissing the alarm disarms the system', async ({ page }) => {
     await openApp(page);
-    await setExitDelay(page, 1);
 
     await mode(page, 'away').click();
-    await expect(page.locator('.sn-hero__label')).toHaveText('Armed', { timeout: 5000 });
+    await expect(page.locator('.sn-hero__label')).toHaveText('Armed', { timeout: 8000 });
     await sensorRow(page, 'Front Door').click();
     await expect(page.locator('.sn-hero__label')).toHaveText('Alarm');
 
@@ -133,10 +126,9 @@ test.describe('Sentinelle', () => {
      trigger, while the perimeter stays live. */
   test('Home mode ignores interior motion but still arms the perimeter', async ({ page }) => {
     await openApp(page);
-    await setExitDelay(page, 1);
 
     await mode(page, 'home').click();
-    await expect(page.locator('.sn-hero__label')).toHaveText('Armed', { timeout: 5000 });
+    await expect(page.locator('.sn-hero__label')).toHaveText('Armed', { timeout: 8000 });
     await expect(page.locator('.sn-hero__sub'))
       .toHaveText('Perimeter active · interior ignored');
     await expect(sensorRow(page, 'Living Room')).toContainText('ignored in Home');
