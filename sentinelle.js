@@ -104,18 +104,18 @@
   var SENSOR_ICON = { contact: 'door', motion: 'motion', smoke: 'smoke', water: 'window' };
 
   var HERO = {
-    disarmed: { icon: 'off',    label: 'Disarmed',   badge: null },
-    arming:   { icon: 'clock',  label: 'Arming…',    badge: null },
-    armed:    { icon: 'check',  label: 'Armed',      badge: null },
-    alarm:    { icon: 'bell',   label: 'Alarm',      badge: null }
+    disarmed: { icon: 'off',   label: 'Disarmed' },
+    arming:   { icon: 'clock', label: 'Arming…' },
+    armed:    { icon: 'check', label: 'Armed' },
+    alarm:    { icon: 'bell',  label: 'Alarm' }
   };
 
   function heroSub(s) {
     if (s.status === 'alarm')  return 'Siren active · Contacts alerted';
     if (s.status === 'arming') return 'Leave now — exit delay running';
-    if (s.status === 'armed')  return s.mode === 'away'
-      ? 'All zones active'
-      : 'Perimeter active · interior ignored';
+    if (s.status === 'armed') {
+      return s.mode === 'away' ? 'All zones active' : 'Perimeter active · interior ignored';
+    }
     var open = s.sensors.filter(S.isTripped).length;
     return open ? open + ' sensor' + (open > 1 ? 's' : '') + ' need attention' : 'All sensors resting';
   }
@@ -171,6 +171,7 @@
         return el('button', {
           class: 'sn-mode',
           type: 'button',
+          'data-mode': m.id,
           'aria-pressed': String(s.mode === m.id),
           onclick: function () { setMode(m.id); }
         }, [
@@ -204,6 +205,7 @@
     return el('button', {
       class: cls + (ignored ? ' sn-row__muted' : ''),
       type: 'button',
+      'data-sensor': sensor.id,
       onclick: function () { toggleSensor(sensor.id); }
     }, [
       el('span', { class: 'sn-row__icon', html: icon(SENSOR_ICON[sensor.type], { size: 19 }) }),
@@ -390,6 +392,7 @@
           class: 'sn-tab',
           type: 'button',
           role: 'tab',
+          'data-tab': t.id,
           'aria-selected': String(s.tab === t.id),
           onclick: function () { setTab(t.id); }
         }, kids));

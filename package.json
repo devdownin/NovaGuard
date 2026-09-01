@@ -1,0 +1,17 @@
+{
+  "name": "novaguard-sentinelle",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sentinelle — the NovaGuard mobile client, built on the nocturne design system.",
+  "scripts": {
+    "lint": "eslint .",
+    "test": "playwright test",
+    "test:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.56.1",
+    "eslint": "^10.1.0",
+    "globals": "^16.4.0"
+  }
+}
