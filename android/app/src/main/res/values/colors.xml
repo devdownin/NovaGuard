@@ -1,0 +1,4 @@
+<resources>
+    <!-- Nocturne --color-bg, matches the app's in-app dark ground. -->
+    <color name="ic_launcher_background">#161826</color>
+</resources>
