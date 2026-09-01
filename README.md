@@ -12,6 +12,7 @@ Caméra de surveillance intelligente, locale et open source. NovaGuard transform
 - **Historique** — événements enregistrés sous forme de cartes, filtrables par type et par période, avec détail complet (lecture, confiance, taille, suppression) en panneau.
 - **Setup** — réglages de surveillance, détection, enregistrement, stockage et notifications regroupés par sections repliables ; la sensibilité et le seuil de confiance pilotent directement le pipeline de détection.
 - **Confidentialité par conception** — traitement 100 % local, y compris la détection ; réglages, permissions et historique sont stockés uniquement sur l'appareil (`AsyncStorage`), jamais transmis.
+- **Premier lancement** — écran de démarrage animé (viseur, marque, trois piliers du produit) pendant l'hydratation de l'état persisté, avant l'onboarding.
 
 > La détection tourne réellement sur l'appareil (caméra + TFLite), mais rien n'est encore écrit sur disque : pas d'enregistrement vidéo réel pour l'instant — voir [Feuille de route](#feuille-de-route). L'alignement visuel de la zone de détection avec l'aperçu caméra n'a pas pu être calibré sur un vrai appareil dans cet environnement de build ; à vérifier en priorité en conditions réelles.
 
@@ -53,6 +54,8 @@ src/
   theme.ts      jetons de design (couleurs, typographie, espacements)
 assets/fonts/   police Inter embarquée
 assets/models/  modèle de détection TensorFlow Lite embarqué
+assets/splash/  illustration de l'écran de démarrage
+assets/store/   icône source et icône 512×512 pour les fiches store
 ```
 
 ## Feuille de route

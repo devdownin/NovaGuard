@@ -3,7 +3,7 @@
  * @format
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { StatusBar, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { color } from './src/theme';
@@ -16,6 +16,7 @@ import { VideoDetailSheet } from './src/components/VideoDetailSheet';
 import { InfoSheet } from './src/components/InfoSheet';
 import { OnboardingModal } from './src/components/OnboardingModal';
 import { ConfirmDialog } from './src/components/ConfirmDialog';
+import { SplashScreen, SPLASH_MIN_DURATION_MS } from './src/components/SplashScreen';
 
 function AppShell() {
   const {
@@ -23,8 +24,16 @@ function AppShell() {
     confirmWipe, cancelWipe, doWipe, events,
   } = useAppState();
 
-  if (!hydrated) {
-    return <View style={styles.root} />;
+  // Keeps the splash up for a minimum stretch so its progress bar reads as
+  // real feedback instead of a flash, even when hydration itself is instant.
+  const [minDurationElapsed, setMinDurationElapsed] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setMinDurationElapsed(true), SPLASH_MIN_DURATION_MS);
+    return () => clearTimeout(t);
+  }, []);
+
+  if (!hydrated || !minDurationElapsed) {
+    return <SplashScreen />;
   }
 
   return (
