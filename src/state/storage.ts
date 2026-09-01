@@ -1,5 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { DetectionEvent, Permissions, Settings } from './types';
+import { DetectionEvent, Settings } from './types';
+
+/** Camera permission is real OS state, re-read live — only mic/notif are simulated & persisted. */
+export type SimulatedPermissions = { mic: boolean; notif: boolean };
 
 const KEYS = {
   settings: '@novaguard:settings',
@@ -31,8 +34,8 @@ export const storage = {
   loadSettings: () => readJson<Settings>(KEYS.settings),
   saveSettings: (v: Settings) => writeJson(KEYS.settings, v),
 
-  loadPerms: () => readJson<Permissions>(KEYS.perms),
-  savePerms: (v: Permissions) => writeJson(KEYS.perms, v),
+  loadPerms: () => readJson<SimulatedPermissions>(KEYS.perms),
+  savePerms: (v: SimulatedPermissions) => writeJson(KEYS.perms, v),
 
   loadEvents: () => readJson<DetectionEvent[]>(KEYS.events),
   saveEvents: (v: DetectionEvent[]) => writeJson(KEYS.events, v),

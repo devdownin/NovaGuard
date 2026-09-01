@@ -1,14 +1,18 @@
 import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
 } from 'react';
+import { useCameraPermission } from 'react-native-vision-camera';
 import {
   Camera, DetectionEvent, DetectionKind, ExpandedSections, HistoryFilter, InfoPanel,
   MaxDuration, OnboardingStep, Period, Permissions, PostRoll, PreRoll, Quality,
   Retention, Sensitivity, Settings, Tab,
 } from './types';
-import { defaultDetToday, defaultEvents, defaultLastDet, defaultPermissions, defaultSettings } from './defaults';
+import {
+  defaultDetToday, defaultEvents, defaultLastDet, defaultSettings, defaultSimulatedPermissions,
+} from './defaults';
 import { storage } from './storage';
 import { daysAgo, formatClock, formatMo, pad } from '../utils/date';
+import { DetectionBox, FrameDetection } from '../ml/types';
 
 interface AppStateValue {
   hydrated: boolean;
@@ -21,11 +25,14 @@ interface AppStateValue {
   monitoring: boolean;
   det: DetectionKind | null;
   conf: number;
+  box: DetectionBox | null;
   recSec: number;
   clock: string;
   detToday: number;
   lastDet: string;
   toggleMonitoring: () => void;
+  /** Called from the camera frame-processor (JS thread) with this frame's qualifying detections. */
+  reportDetections: (detections: FrameDetection[]) => void;
 
   // history
   events: DetectionEvent[];
@@ -96,6 +103,10 @@ const POST_OPTIONS: PostRoll[] = ['5 s', '10 s', '30 s'];
 const MAX_OPTIONS: MaxDuration[] = ['1 min', '2 min', '5 min'];
 const QUALITY_OPTIONS: Quality[] = ['720p', '1080p', '4K'];
 
+// How many consecutive empty frame reports end an active detection session.
+// At the frame processor's throttled rate (1–5 fps, see settings.sens) this is roughly 1–3s.
+const MISS_LIMIT = 3;
+
 export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
 
@@ -104,6 +115,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [monitoring, setMonitoring] = useState(false);
   const [det, setDet] = useState<DetectionKind | null>(null);
   const [conf, setConf] = useState(0);
+  const [box, setBox] = useState<DetectionBox | null>(null);
   const [recSec, setRecSec] = useState(0);
   const [clock, setClock] = useState(() => formatClock(new Date()));
   const [detToday, setDetToday] = useState(defaultDetToday);
@@ -123,7 +135,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [info, setInfo] = useState<InfoPanel>(null);
 
   const [onb, setOnb] = useState<OnboardingStep>(null);
-  const [perms, setPerms] = useState<Permissions>(defaultPermissions);
+  const [simPerms, setSimPerms] = useState(defaultSimulatedPermissions);
+  const cameraPermission = useCameraPermission();
+
+  const perms: Permissions = useMemo(() => ({
+    cam: cameraPermission.hasPermission,
+    mic: simPerms.mic,
+    notif: simPerms.notif,
+  }), [cameraPermission.hasPermission, simPerms]);
 
   // ── hydrate from disk ────────────────────────────────────────────────
   useEffect(() => {
@@ -139,7 +158,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       ]);
       if (cancelled) return;
       if (s) setSettings(s);
-      if (p) setPerms(p);
+      if (p) setSimPerms(p);
       if (ev) setEvents(ev);
       if (typeof dt === 'number') setDetToday(dt);
       if (ld) setLastDet(ld);
@@ -151,7 +170,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   // ── persist on change (skip the initial hydration write) ───────────
   useEffect(() => { if (hydrated) storage.saveSettings(settings); }, [hydrated, settings]);
-  useEffect(() => { if (hydrated) storage.savePerms(perms); }, [hydrated, perms]);
+  useEffect(() => { if (hydrated) storage.savePerms(simPerms); }, [hydrated, simPerms]);
   useEffect(() => { if (hydrated) storage.saveEvents(events); }, [hydrated, events]);
   useEffect(() => { if (hydrated) storage.saveDetToday(detToday); }, [hydrated, detToday]);
   useEffect(() => { if (hydrated) storage.saveLastDet(lastDet); }, [hydrated, lastDet]);
@@ -162,7 +181,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(iv);
   }, []);
 
-  // ── detection simulation ─────────────────────────────────────────────
+  // ── detection: fed by the camera's frame processor ──────────────────
   const pushEvent = useCallback((kind: DetectionKind, dur: number, c: number) => {
     const hm = pad(new Date().getHours()) + ':' + pad(new Date().getMinutes());
     setDetToday(v => v + 1);
@@ -173,42 +192,58 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     ]);
   }, []);
 
-  const detRef = useRef<DetectionKind | null>(null);
-  const recSecRef = useRef(0);
+  // Active-session bookkeeping. Refs (not state) because reportDetections
+  // fires many times a second and only some updates should trigger a render.
+  const sessionKindRef = useRef<DetectionKind | null>(null);
+  const sessionStartRef = useRef(0);
+  const sessionMaxConfRef = useRef(0);
+  const missStreakRef = useRef(0);
 
-  useEffect(() => {
-    if (!monitoring) return;
-    let t = 0;
-    detRef.current = null;
-    recSecRef.current = 0;
-    const iv = setInterval(() => {
-      t += 1;
-      const phase = t % 15;
-      let resetRec = false;
-      if (phase === 4) { detRef.current = 'Personne'; setConf(94); setDet('Personne'); resetRec = true; }
-      else if (phase === 8) { pushEvent('Personne', 18, 94); detRef.current = null; setDet(null); }
-      else if (phase === 10) { detRef.current = 'Animal'; setConf(88); setDet('Animal'); resetRec = true; }
-      else if (phase === 13) { pushEvent('Animal', 11, 88); detRef.current = null; setDet(null); }
+  const endSession = useCallback(() => {
+    const kind = sessionKindRef.current;
+    if (!kind) return;
+    const dur = Math.max(1, Math.round((Date.now() - sessionStartRef.current) / 1000));
+    pushEvent(kind, dur, Math.round(sessionMaxConfRef.current * 100));
+    sessionKindRef.current = null;
+    missStreakRef.current = 0;
+    setDet(null);
+    setBox(null);
+    setRecSec(0);
+  }, [pushEvent]);
 
-      if (detRef.current) {
-        recSecRef.current = resetRec ? 0 : recSecRef.current + 1;
-        setRecSec(recSecRef.current);
+  const reportDetections = useCallback((detections: FrameDetection[]) => {
+    const best = detections[0];
+
+    if (best && (sessionKindRef.current == null || sessionKindRef.current === best.kind)) {
+      missStreakRef.current = 0;
+      if (sessionKindRef.current == null) {
+        sessionKindRef.current = best.kind;
+        sessionStartRef.current = Date.now();
+        sessionMaxConfRef.current = best.confidence;
+        setRecSec(0);
+      } else {
+        sessionMaxConfRef.current = Math.max(sessionMaxConfRef.current, best.confidence);
+        setRecSec(Math.floor((Date.now() - sessionStartRef.current) / 1000));
       }
-    }, 1000);
-    return () => clearInterval(iv);
-  }, [monitoring, pushEvent]);
+      setDet(best.kind);
+      setConf(Math.round(best.confidence * 100));
+      setBox(best.box);
+      return;
+    }
+
+    // Nothing matching this frame (or a different kind while one is already active): count a miss.
+    if (sessionKindRef.current != null) {
+      missStreakRef.current += 1;
+      if (missStreakRef.current >= MISS_LIMIT) endSession();
+    }
+  }, [endSession]);
 
   const toggleMonitoring = useCallback(() => {
     setMonitoring(m => {
-      if (m) {
-        detRef.current = null;
-        recSecRef.current = 0;
-        setDet(null);
-        setRecSec(0);
-      }
+      if (m) endSession();
       return !m;
     });
-  }, []);
+  }, [endSession]);
 
   // ── history ──────────────────────────────────────────────────────────
   const togglePeriodOpen = useCallback(() => setPeriodOpen(v => !v), []);
@@ -267,13 +302,17 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     storage.saveOnboardingComplete(true);
   }, []);
   const grantPermission = useCallback((key: keyof Permissions) => {
-    setPerms(p => ({ ...p, [key]: true }));
-  }, []);
+    if (key === 'cam') {
+      cameraPermission.requestPermission();
+      return;
+    }
+    setSimPerms(p => ({ ...p, [key]: true }));
+  }, [cameraPermission]);
 
   const value = useMemo<AppStateValue>(() => ({
     hydrated,
     tab, setTab,
-    monitoring, det, conf, recSec, clock, detToday, lastDet, toggleMonitoring,
+    monitoring, det, conf, box, recSec, clock, detToday, lastDet, toggleMonitoring, reportDetections,
     events, filter, setFilter, period, setPeriod, periodOpen, togglePeriodOpen, selected, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete,
     confirmWipe, askWipe, cancelWipe, doWipe,
@@ -283,7 +322,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     info, openInfo, closeInfo,
     onb, perms, onbNext, onbFinish, grantPermission,
   }), [
-    hydrated, tab, monitoring, det, conf, recSec, clock, detToday, lastDet, toggleMonitoring,
+    hydrated, tab, monitoring, det, conf, box, recSec, clock, detToday, lastDet, toggleMonitoring, reportDetections,
     events, filter, period, periodOpen, togglePeriodOpen, selected, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete, confirmWipe, askWipe, cancelWipe, doWipe,
     settings, toggleSection, cycleCamera, toggleBoot, toggleNight, togglePerson, toggleAnimal,

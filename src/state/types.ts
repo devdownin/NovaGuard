@@ -36,6 +36,7 @@ export interface ExpandedSections {
 }
 
 export interface Permissions {
+  /** Backed by the real OS camera permission (react-native-vision-camera) — not persisted, always re-read live. */
   cam: boolean;
   mic: boolean;
   notif: boolean;

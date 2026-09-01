@@ -1,14 +1,10 @@
-import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Animated, LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { color, font } from '../theme';
 import { useAppState } from '../state/AppStateContext';
 import { GridOverlay } from './GridOverlay';
-
-const DET_BOX = {
-  Personne: { left: '24%', top: '16%', width: '44%', height: '64%' },
-  Animal: { left: '40%', top: '48%', width: '42%', height: '34%' },
-} as const;
+import { CameraFeed } from './CameraFeed';
 
 function ScanBeam() {
   const y = useRef(new Animated.Value(0)).current;
@@ -51,9 +47,28 @@ function RecDot() {
 }
 
 export function Viewfinder() {
-  const { monitoring, det, conf, recSec, clock } = useAppState();
+  const { monitoring, det, conf, box, recSec, clock, perms } = useAppState();
   const recording = !!det;
-  const box = det ? DET_BOX[det as 'Personne' | 'Animal'] : null;
+
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  const onLayout = useCallback((e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    setSize({ width, height });
+  }, []);
+  // The model sees a center-cropped SQUARE of the frame (vision-camera-resize-plugin's
+  // default crop for a square target size) — the detection box is normalized to that
+  // square, so it must be positioned within the matching centered square of the view,
+  // not the full (usually taller-than-wide) viewfinder rect.
+  const squareSize = Math.min(size.width, size.height);
+  const squareOffsetX = (size.width - squareSize) / 2;
+  const squareOffsetY = (size.height - squareSize) / 2;
+
+  const standbyLabel = !perms.cam
+    ? 'AUTORISEZ LA CAMÉRA'
+    : monitoring
+      ? 'AUCUNE CAMÉRA DÉTECTÉE'
+      : 'CAMÉRA EN VEILLE';
+  const standbySubtext = !perms.cam ? 'Setup → Confidentialité → Permissions' : undefined;
 
   const overlayText = det
     ? det === 'Personne' ? 'Personne détectée · enregistrement' : 'Animal détecté · enregistrement'
@@ -61,7 +76,8 @@ export function Viewfinder() {
   const overlayDotColor = det ? color.accent : color.neutral600;
 
   return (
-    <View style={[styles.frame, det ? styles.frameGlowActive : styles.frameGlowIdle]}>
+    <View style={[styles.frame, det ? styles.frameGlowActive : styles.frameGlowIdle]} onLayout={onLayout}>
+      {/* Standby background — only visible where the real camera isn't covering it. */}
       <LinearGradient
         colors={['#20232f', '#14161f', '#0c0e15']}
         locations={[0, 0.45, 1]}
@@ -71,19 +87,35 @@ export function Viewfinder() {
       />
       <GridOverlay />
       <View style={styles.glowBlob} pointerEvents="none" />
-
       <View style={styles.placeholderTextWrap} pointerEvents="none">
-        <Text style={styles.placeholderText}>FLUX CAMÉRA</Text>
-        <Text style={styles.placeholderSubtext}>placeholder — arrière 1×</Text>
+        <Text style={styles.placeholderText}>{standbyLabel}</Text>
+        {standbySubtext && <Text style={styles.placeholderSubtext}>{standbySubtext}</Text>}
       </View>
+
+      <CameraFeed style={StyleSheet.absoluteFill} active={monitoring} />
 
       {monitoring && <ScanBeam />}
 
-      {box && (
-        <View style={[styles.detBox, box]}>
-          <View style={styles.detLabelChip}>
-            <Text style={styles.detLabelText}>{det}</Text>
-            <Text style={styles.detConfText}>{conf} %</Text>
+      {box && squareSize > 0 && (
+        <View
+          style={[styles.detectionLayer, { left: squareOffsetX, top: squareOffsetY, width: squareSize, height: squareSize }]}
+          pointerEvents="none"
+        >
+          <View
+            style={[
+              styles.detBox,
+              {
+                left: `${box.x * 100}%`,
+                top: `${box.y * 100}%`,
+                width: `${box.width * 100}%`,
+                height: `${box.height * 100}%`,
+              },
+            ]}
+          >
+            <View style={styles.detLabelChip}>
+              <Text style={styles.detLabelText}>{det}</Text>
+              <Text style={styles.detConfText}>{conf} %</Text>
+            </View>
           </View>
         </View>
       )}
@@ -141,14 +173,14 @@ const styles = StyleSheet.create({
   placeholderText: {
     fontFamily: font.regular,
     fontSize: 10,
-    letterSpacing: 4.4,
+    letterSpacing: 2.2,
     color: color.neutral700,
     textAlign: 'center',
   },
   placeholderSubtext: {
     fontFamily: font.regular,
     fontSize: 9,
-    letterSpacing: 2,
+    letterSpacing: 0.4,
     color: color.neutral700,
     textAlign: 'center',
     marginTop: 4,
@@ -158,6 +190,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 70,
+  },
+  detectionLayer: {
+    position: 'absolute',
   },
   detBox: {
     position: 'absolute',

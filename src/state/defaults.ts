@@ -1,4 +1,5 @@
-import { DetectionEvent, Permissions, Settings } from './types';
+import { DetectionEvent, Settings } from './types';
+import { SimulatedPermissions } from './storage';
 
 function at(daysBack: number, hours: number, minutes: number): number {
   const d = new Date();
@@ -28,8 +29,7 @@ export const defaultSettings: Settings = {
   exp: { surv: true, det: false, rec: false, sto: false, not: false, about: false },
 };
 
-export const defaultPermissions: Permissions = {
-  cam: false,
+export const defaultSimulatedPermissions: SimulatedPermissions = {
   mic: false,
   notif: false,
 };
