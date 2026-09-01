@@ -63,6 +63,7 @@ interface AppStateValue {
   toggleNight: () => void;
   togglePerson: () => void;
   toggleAnimal: () => void;
+  toggleAutoZoom: () => void;
   setSensitivity: (s: Sensitivity) => void;
   setThreshold: (v: number) => void;
   cyclePre: () => void;
@@ -281,6 +282,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const toggleNight = useCallback(() => patchSettings({ night: !settings.night }), [patchSettings, settings.night]);
   const togglePerson = useCallback(() => patchSettings({ person: !settings.person }), [patchSettings, settings.person]);
   const toggleAnimal = useCallback(() => patchSettings({ animal: !settings.animal }), [patchSettings, settings.animal]);
+  const toggleAutoZoom = useCallback(() => patchSettings({ autoZoom: !settings.autoZoom }), [patchSettings, settings.autoZoom]);
   const toggleAutoDel = useCallback(() => patchSettings({ autoDel: !settings.autoDel }), [patchSettings, settings.autoDel]);
   const toggleNotif = useCallback(() => patchSettings({ notif: !settings.notif }), [patchSettings, settings.notif]);
   const toggleNotifDet = useCallback(() => patchSettings({ notifDet: !settings.notifDet }), [patchSettings, settings.notifDet]);
@@ -316,7 +318,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     events, filter, setFilter, period, setPeriod, periodOpen, togglePeriodOpen, selected, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete,
     confirmWipe, askWipe, cancelWipe, doWipe,
-    settings, toggleSection, cycleCamera, toggleBoot, toggleNight, togglePerson, toggleAnimal,
+    settings, toggleSection, cycleCamera, toggleBoot, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom,
     setSensitivity, setThreshold, cyclePre, cyclePost, cycleMax, cycleQuality, setRetention,
     toggleAutoDel, toggleNotif, toggleNotifDet, toggleSound, toggleVibe, wipeAllVideos,
     info, openInfo, closeInfo,
@@ -325,7 +327,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     hydrated, tab, monitoring, det, conf, box, recSec, clock, detToday, lastDet, toggleMonitoring, reportDetections,
     events, filter, period, periodOpen, togglePeriodOpen, selected, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete, confirmWipe, askWipe, cancelWipe, doWipe,
-    settings, toggleSection, cycleCamera, toggleBoot, toggleNight, togglePerson, toggleAnimal,
+    settings, toggleSection, cycleCamera, toggleBoot, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom,
     setSensitivity, setThreshold, cyclePre, cyclePost, cycleMax, cycleQuality, setRetention,
     toggleAutoDel, toggleNotif, toggleNotifDet, toggleSound, toggleVibe, wipeAllVideos,
     info, openInfo, closeInfo, onb, perms, onbNext, onbFinish, grantPermission,

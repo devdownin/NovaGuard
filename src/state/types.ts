@@ -50,6 +50,8 @@ export interface Settings {
   animal: boolean;
   sens: Sensitivity;
   threshold: number;
+  /** Cinematic auto-zoom: ease in on a detected face, hold, then pull back to the whole person. */
+  autoZoom: boolean;
   pre: PreRoll;
   post: PostRoll;
   max: MaxDuration;

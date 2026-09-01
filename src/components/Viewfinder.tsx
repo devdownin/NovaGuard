@@ -3,6 +3,7 @@ import { Animated, LayoutChangeEvent, StyleSheet, Text, View } from 'react-nativ
 import LinearGradient from 'react-native-linear-gradient';
 import { color, font } from '../theme';
 import { useAppState } from '../state/AppStateContext';
+import { useAutoZoom } from '../camera/useAutoZoom';
 import { GridOverlay } from './GridOverlay';
 import { CameraFeed } from './CameraFeed';
 
@@ -47,7 +48,7 @@ function RecDot() {
 }
 
 export function Viewfinder() {
-  const { monitoring, det, conf, box, recSec, clock, perms } = useAppState();
+  const { monitoring, det, conf, box, recSec, clock, perms, settings } = useAppState();
   const recording = !!det;
 
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -62,6 +63,12 @@ export function Viewfinder() {
   const squareSize = Math.min(size.width, size.height);
   const squareOffsetX = (size.width - squareSize) / 2;
   const squareOffsetY = (size.height - squareSize) / 2;
+
+  const autoZoom = useAutoZoom({
+    enabled: monitoring && settings.autoZoom,
+    viewWidth: size.width,
+    viewHeight: size.height,
+  });
 
   const standbyLabel = !perms.cam
     ? 'AUTORISEZ LA CAMÉRA'
@@ -92,33 +99,54 @@ export function Viewfinder() {
         {standbySubtext && <Text style={styles.placeholderSubtext}>{standbySubtext}</Text>}
       </View>
 
-      <CameraFeed style={StyleSheet.absoluteFill} active={monitoring} />
+      {/* Camera and detection boxes move together, so a box stays glued to its
+          subject while the auto-zoom eases in and out. */}
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFill,
+          {
+            transform: [
+              { translateX: autoZoom.translateX },
+              { translateY: autoZoom.translateY },
+              { scale: autoZoom.scale },
+            ],
+          },
+        ]}
+      >
+        <CameraFeed
+          style={StyleSheet.absoluteFill}
+          active={monitoring}
+          viewWidth={size.width}
+          viewHeight={size.height}
+          onFrame={autoZoom.submitFrame}
+        />
 
-      {monitoring && <ScanBeam />}
-
-      {box && squareSize > 0 && (
-        <View
-          style={[styles.detectionLayer, { left: squareOffsetX, top: squareOffsetY, width: squareSize, height: squareSize }]}
-          pointerEvents="none"
-        >
+        {box && squareSize > 0 && (
           <View
-            style={[
-              styles.detBox,
-              {
-                left: `${box.x * 100}%`,
-                top: `${box.y * 100}%`,
-                width: `${box.width * 100}%`,
-                height: `${box.height * 100}%`,
-              },
-            ]}
+            style={[styles.detectionLayer, { left: squareOffsetX, top: squareOffsetY, width: squareSize, height: squareSize }]}
+            pointerEvents="none"
           >
-            <View style={styles.detLabelChip}>
-              <Text style={styles.detLabelText}>{det}</Text>
-              <Text style={styles.detConfText}>{conf} %</Text>
+            <View
+              style={[
+                styles.detBox,
+                {
+                  left: `${box.x * 100}%`,
+                  top: `${box.y * 100}%`,
+                  width: `${box.width * 100}%`,
+                  height: `${box.height * 100}%`,
+                },
+              ]}
+            >
+              <View style={styles.detLabelChip}>
+                <Text style={styles.detLabelText}>{det}</Text>
+                <Text style={styles.detConfText}>{conf} %</Text>
+              </View>
             </View>
           </View>
-        </View>
-      )}
+        )}
+      </Animated.View>
+
+      {monitoring && <ScanBeam />}
 
       <View style={styles.overlayChip}>
         <View style={[styles.overlayDot, { backgroundColor: overlayDotColor }]} />
@@ -130,6 +158,14 @@ export function Viewfinder() {
           <RecDot />
           <Text style={styles.recLabel}>REC</Text>
           <Text style={styles.recClock}>{'00:' + String(recSec).padStart(2, '0')}</Text>
+        </View>
+      )}
+
+      {autoZoom.phase !== 'idle' && (
+        <View style={styles.zoomChip}>
+          <Text style={styles.zoomChipText}>
+            {autoZoom.phase === 'face' ? 'ZOOM VISAGE' : 'PLAN LARGE'}
+          </Text>
         </View>
       )}
 
@@ -280,6 +316,23 @@ const styles = StyleSheet.create({
     fontSize: 10.5,
     color: color.neutral400,
     fontVariant: ['tabular-nums'],
+  },
+  zoomChip: {
+    position: 'absolute',
+    right: 12,
+    bottom: 12,
+    paddingVertical: 4,
+    paddingHorizontal: 9,
+    borderRadius: 999,
+    backgroundColor: 'rgba(22,24,38,0.68)',
+    borderWidth: 1,
+    borderColor: color.accent700,
+  },
+  zoomChipText: {
+    fontFamily: font.medium,
+    fontSize: 9.5,
+    letterSpacing: 1.1,
+    color: color.accent300,
   },
   clockText: {
     position: 'absolute',
