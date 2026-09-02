@@ -49,7 +49,7 @@ npm run android
 
 ### Récupérer un APK sans installer l'environnement Android
 
-Le workflow [`CI`](.github/workflows/ci.yml) construit un APK installable après chaque fusion sur `main`, et à la demande sur n'importe quelle branche : onglet **Actions** → *CI* → **Run workflow** (choisir la branche), puis récupérer `novaguard-release-apk` dans les artefacts du run une fois terminé. Aucun secret de signature n'est nécessaire — le build `release` est signé avec le keystore de debug du dépôt, ce qui suffit à installer l'application sur un appareil de test mais pas à la publier (voir [Signed APK](https://reactnative.dev/docs/signed-apk-android) pour un vrai keystore de production).
+Le workflow [`CI`](.github/workflows/ci.yml) construit un APK installable après chaque fusion sur `main`, lors de la publication d'un tag de version (ex. `v1.0.0`, automatiquement joint à la *Release* GitHub), et à la demande sur n'importe quelle branche : onglet **Actions** → *CI* → **Run workflow** (choisir la branche), puis récupérer `novaguard-release-apk` dans les artefacts du run une fois terminé. Aucun secret de signature n'est nécessaire — le build `release` est signé avec le keystore de debug du dépôt, ce qui suffit à installer l'application sur un appareil de test mais pas à la publier (voir [Signed APK](https://reactnative.dev/docs/signed-apk-android) pour un vrai keystore de production).
 
 ## Structure du projet
 
