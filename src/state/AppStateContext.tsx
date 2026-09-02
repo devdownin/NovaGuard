@@ -17,10 +17,12 @@ import { DetectionBox, FrameDetection } from '../ml/types';
 import { confirmedTracks, primaryTrack, Track, updateTracks } from '../ml/tracker';
 import { Clip, useRecorder } from '../recording/useRecorder';
 import {
-  bytesToReclaim, eventsToReclaim, expiredEvents, MIN_FREE_BYTES, postRollMs, sameDay,
-  todayCount, totalBytes,
+  bytesToReclaim, clipFileName, clipOutcome, eventsToReclaim, expiredEvents, MIN_FREE_BYTES,
+  postRollMs, sameDay, todayCount, totalBytes,
 } from '../recording/library';
-import { deleteFiles, orphanedRecordings, storageInfo } from '../recording/videoStore';
+import {
+  deleteFiles, orphanedRecordings, renameRecording, storageInfo,
+} from '../recording/videoStore';
 import {
   dismissDetectionAlert, hasNotificationPermission, notifyDetection,
   openDetectionChannelSettings, requestNotificationPermission, startForegroundService,
@@ -272,9 +274,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const lastAlertRef = useRef<number | null>(null);
 
   const commitEvent = useCallback((
-    kind: DetectionKind, dur: number, c: number, clip: Clip | null,
+    kind: DetectionKind, dur: number, c: number, clip: Clip | null, at: number = Date.now(),
   ) => {
-    const now = Date.now();
+    const now = at;
     setDetToday(v => v + 1);
     setLastDet(pad(new Date(now).getHours()) + ':' + pad(new Date(now).getMinutes()));
     setEvents(evs => [
@@ -306,20 +308,45 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     conf: Math.round(sessionMaxConfRef.current * 100),
   }), []);
 
+  /**
+   * Files the finished clip against the detection that caused it, under a name
+   * that says which and when.
+   *
+   * Every clip must end up either attached to an event or deleted. A recording
+   * nothing refers to is a video of an empty room taking up a user's storage,
+   * invisible in the app and only swept away at the next launch — this used to
+   * be the silent third outcome here.
+   */
   const onClip = useCallback((clip: Clip) => {
     const pending = pendingRef.current;
     pendingRef.current = null;
-    if (pending) {
-      commitEvent(pending.kind, pending.dur, pending.conf, clip);
-      return;
-    }
-    // No pending stop: the duration cap cut the clip while the subject is still
-    // in frame. Close this segment — the next frame reopens a session, so a long
-    // passage is stored as consecutive clips rather than one unbounded file.
-    if (sessionKindRef.current != null) {
-      const meta = sessionMeta();
-      commitEvent(meta.kind, meta.dur, meta.conf, clip);
-      clearSession();
+
+    // The duration cap can cut a clip while the subject is still in frame; the
+    // next frame reopens a session, so a long passage becomes consecutive clips.
+    const meta = pending ?? (sessionKindRef.current != null ? sessionMeta() : null);
+
+    switch (clipOutcome(meta != null, clip.bytes)) {
+      case 'discard':
+        // A stop that raced the session ending, or the component going away
+        // mid-clip. Nothing will ever point at this file.
+        deleteFiles([clip.path]);
+        return;
+
+      case 'event-only':
+        // The encoder produced an empty file. Keep the sighting, drop the husk:
+        // an unplayable 0-byte row in the history is worse than none.
+        if (!pending) clearSession();
+        deleteFiles([clip.path]);
+        commitEvent(meta!.kind, meta!.dur, meta!.conf, null);
+        return;
+
+      case 'attach': {
+        if (!pending) clearSession();
+        const at = Date.now();
+        renameRecording(clip.path, clipFileName(meta!.kind, at)).then(path => {
+          commitEvent(meta!.kind, meta!.dur, meta!.conf, { ...clip, path }, at);
+        });
+      }
     }
   }, [clearSession, commitEvent, sessionMeta]);
 

@@ -1,5 +1,5 @@
 import {
-  bytesToReclaim, eventsToReclaim, expiredEvents, formatBytes, LOW_SPACE_BYTES,
+  bytesToReclaim, clipFileName, clipOutcome, eventsToReclaim, expiredEvents, formatBytes, LOW_SPACE_BYTES,
   maxDurationMs, postRollMs, qualityBitRate, qualityResolution, retentionDays,
   sameDay, todayCount, totalBytes,
 } from '../src/recording/library';
@@ -149,5 +149,58 @@ describe('sameDay', () => {
     const early = new Date(2026, 4, 4, 0, 5).getTime();
     expect(sameDay(late, early)).toBe(false);
     expect(sameDay(late, new Date(2026, 4, 3, 0, 1).getTime())).toBe(true);
+  });
+});
+
+describe('clipFileName', () => {
+  it('names a clip after what triggered it and when', () => {
+    const at = new Date(2026, 8, 2, 14, 32, 7).getTime();
+    expect(clipFileName('Personne', at)).toBe('Personne_2026-09-02_14-32-07.mp4');
+  });
+
+  it('distinguishes an animal', () => {
+    const at = new Date(2026, 0, 5, 9, 4, 3).getTime();
+    expect(clipFileName('Animal', at)).toBe('Animal_2026-01-05_09-04-03.mp4');
+  });
+
+  it('pads every field, so names sort chronologically as plain text', () => {
+    const early = clipFileName('Personne', new Date(2026, 0, 5, 9, 4, 3).getTime());
+    const later = clipFileName('Personne', new Date(2026, 0, 5, 10, 0, 0).getTime());
+    const nextDay = clipFileName('Personne', new Date(2026, 0, 6, 0, 0, 0).getTime());
+    expect([nextDay, later, early].sort()).toEqual([early, later, nextDay]);
+  });
+
+  it('uses only characters a filesystem is happy with', () => {
+    const name = clipFileName('Personne', Date.now());
+    expect(name).toMatch(/^[A-Za-z]+_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.mp4$/);
+  });
+});
+
+describe('clipOutcome', () => {
+  it('attaches a real recording to the detection that claimed it', () => {
+    expect(clipOutcome(true, 12 * 1024 * 1024)).toBe('attach');
+  });
+
+  it('discards a recording nothing claims', () => {
+    // The rule the whole thing exists for: never keep footage of an empty room
+    // that no event points at.
+    expect(clipOutcome(false, 12 * 1024 * 1024)).toBe('discard');
+  });
+
+  it('discards it whatever its size, if unclaimed', () => {
+    expect(clipOutcome(false, 0)).toBe('discard');
+    expect(clipOutcome(false, 1)).toBe('discard');
+  });
+
+  it('keeps the sighting but drops an empty file', () => {
+    expect(clipOutcome(true, 0)).toBe('event-only');
+  });
+
+  it('has no fourth outcome', () => {
+    const seen = new Set([
+      clipOutcome(true, 1), clipOutcome(true, 0),
+      clipOutcome(false, 1), clipOutcome(false, 0),
+    ]);
+    expect([...seen].sort()).toEqual(['attach', 'discard', 'event-only']);
   });
 });

@@ -1,5 +1,5 @@
 import {
-  DocumentDirectoryPath, exists, getFSInfo, mkdir, readDir, stat, unlink,
+  DocumentDirectoryPath, exists, getFSInfo, mkdir, moveFile, readDir, stat, unlink,
 } from '@dr.pogodin/react-native-fs';
 import { StorageInfo } from '../state/types';
 
@@ -25,6 +25,30 @@ export async function fileSize(path: string): Promise<number> {
     return Number(info.size) || 0;
   } catch {
     return 0;
+  }
+}
+
+/**
+ * Renames a finished clip in place, returning the path it now lives at.
+ *
+ * Falls back to the original path on any failure: a recording that exists under
+ * an unhelpful name is worth far more than one lost to a rename. Refuses to
+ * clobber an existing file, which two events landing in the same second would
+ * otherwise do.
+ */
+export async function renameRecording(from: string, filename: string): Promise<string> {
+  const to = `${RECORDINGS_DIR}/${filename}`;
+  if (to === from) return from;
+  try {
+    if (await exists(to)) {
+      const unique = filename.replace(/\.mp4$/, `_${Date.now() % 1000}.mp4`);
+      await moveFile(from, `${RECORDINGS_DIR}/${unique}`);
+      return `${RECORDINGS_DIR}/${unique}`;
+    }
+    await moveFile(from, to);
+    return to;
+  } catch {
+    return from;
   }
 }
 

@@ -1,4 +1,4 @@
-import { DetectionEvent, MaxDuration, PostRoll, Quality, Retention } from '../state/types';
+import { DetectionEvent, DetectionKind, MaxDuration, PostRoll, Quality, Retention } from '../state/types';
 
 /**
  * Pure logic behind recording and storage management: how long a clip may run,
@@ -73,6 +73,47 @@ export function qualityBitRate(quality: Quality): number {
     case '4K': return 20_000_000;
     default: return 6_000_000;
   }
+}
+
+/**
+ * What becomes of a clip the encoder has just handed back.
+ *
+ * There are exactly three outcomes and no fourth. "Nothing" used to be the
+ * unwritten fourth: a clip that arrived with no detection to attach it to was
+ * simply ignored, leaving a video of an empty room on disk, invisible in the
+ * app until the next launch swept it up.
+ */
+export type ClipOutcome =
+  /** A detection claims it, and there is a file to attach. */
+  | 'attach'
+  /** A detection claims it, but the encoder produced nothing usable. */
+  | 'event-only'
+  /** Nothing claims it — the recording must not be kept. */
+  | 'discard';
+
+export function clipOutcome(claimed: boolean, bytes: number): ClipOutcome {
+  if (!claimed) return 'discard';
+  return bytes > 0 ? 'attach' : 'event-only';
+}
+
+/**
+ * Name a clip after what triggered it and when: `Personne_2026-09-02_14-32-07.mp4`.
+ *
+ * VisionCamera names recordings itself, with an opaque unique string, so a
+ * directory of clips said nothing about its own contents — you had to open the
+ * app and match a file to a history row by hand. The timestamp here is the
+ * event's own, not the moment the file happens to be renamed, so the two always
+ * agree.
+ *
+ * Local time, and dashes rather than colons: this ends up on a filesystem, and
+ * a person reading the list is in their own timezone, not UTC.
+ */
+export function clipFileName(kind: DetectionKind, at: number): string {
+  const d = new Date(at);
+  const p = (n: number) => String(n).padStart(2, '0');
+  const date = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  const time = `${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`;
+  return `${kind}_${date}_${time}.mp4`;
 }
 
 export function totalBytes(events: DetectionEvent[]): number {

@@ -69,8 +69,12 @@ export function VideoDetailSheet() {
             <StatCell label="Type" value={event.kind} />
             <StatCell label="Durée" value={`${event.dur} secondes`} />
             <StatCell label="Confiance" value={`${event.conf} %`} accent />
-            <StatCell label="Fichier" value={hasClip ? formatBytes(event.bytes) : '—'} />
-            <StatCell label="Stockage" value="Local" />
+            <StatCell label="Taille" value={hasClip ? formatBytes(event.bytes) : '—'} />
+            <StatCell
+              label="Fichier"
+              value={hasClip ? event.path!.split('/').pop()! : 'Aucun'}
+              small
+            />
           </View>
 
           <View style={styles.actions}>
@@ -83,11 +87,21 @@ export function VideoDetailSheet() {
   );
 }
 
-function StatCell({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+interface StatCellProps {
+  label: string;
+  value: string;
+  accent?: boolean;
+  /** For the file name, which is long enough to need the room. */
+  small?: boolean;
+}
+
+function StatCell({ label, value, accent, small }: StatCellProps) {
   return (
     <View style={styles.cell}>
       <Text style={styles.cellLabel}>{label}</Text>
-      <Text style={[styles.cellValue, accent && { color: color.accent300 }]}>{value}</Text>
+      <Text style={[styles.cellValue, small && styles.cellValueSmall, accent && styles.cellValueAccent]}>
+        {value}
+      </Text>
     </View>
   );
 }
@@ -160,6 +174,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: color.text,
     marginTop: 2,
+  },
+  cellValueSmall: {
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  cellValueAccent: {
+    color: color.accent300,
   },
   actions: {
     flexDirection: 'row',
