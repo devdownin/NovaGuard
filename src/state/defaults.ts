@@ -16,6 +16,7 @@ export const defaultSettings: Settings = {
   animal: true,
   sens: 'Moyenne',
   threshold: 75,
+  autoZoom: true,
   pre: '3 s',
   post: '10 s',
   max: '2 min',

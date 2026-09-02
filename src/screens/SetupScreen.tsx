@@ -49,6 +49,9 @@ export function SetupScreen() {
           <SettingRow label="Détecter les animaux">
             <Switch value={settings.animal} onValueChange={s.toggleAnimal} />
           </SettingRow>
+          <SettingRow label="Zoom auto sur les visages" subtitle="Gros plan 4 s, puis retour sur la personne">
+            <Switch value={settings.autoZoom} onValueChange={s.toggleAutoZoom} />
+          </SettingRow>
           <View style={styles.subBlock}>
             <Text style={styles.subLabel}>Sensibilité</Text>
             <SegmentedControl

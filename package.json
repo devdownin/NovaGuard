@@ -38,6 +38,7 @@
     "react-native-safe-area-context": "^5.5.2",
     "react-native-svg": "^15.15.5",
     "react-native-vision-camera": "^4.7.3",
+    "react-native-vision-camera-face-detector": "^1.10.2",
     "react-native-worklets-core": "^1.6.3",
     "vision-camera-resize-plugin": "^3.2.0"
   },

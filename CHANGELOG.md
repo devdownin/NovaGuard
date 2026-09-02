@@ -8,25 +8,32 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et ce p
 
 ### Ajouté
 - Flux caméra réel (`react-native-vision-camera`) à la place du placeholder de l'écran Surveillance.
-- Détection de personnes/animaux sur l'appareil via un modèle TensorFlow Lite embarqué (SSD MobileNet V1, COCO), avec `react-native-fast-tflite` et `vision-camera-resize-plugin` dans un frame processor dédié.
+- Détection de personnes/animaux sur l'appareil via un modèle TensorFlow Lite embarqué (COCO), avec `react-native-fast-tflite` et `vision-camera-resize-plugin` dans un frame processor dédié.
 - Permission caméra réelle (demandée depuis l'onboarding et Setup → Confidentialité, au lieu d'être simulée).
 - Sélection du device caméra (avant/arrière, tentative grand-angle pour « Arrière (0,5×) ») et sensibilité de détection reliées aux vrais réglages.
 - Workflow CI (GitHub Actions) : types, lint et tests sur chaque push/pull request vers `main`.
 - Icône d'application (Android adaptive + legacy, iOS) remplaçant l'icône par défaut de React Native.
 - Écran de démarrage animé (viseur pulsant, marque, trois piliers du produit, illustration de maison la nuit) affiché pendant l'hydratation de l'état.
+- Détection de visages (ML Kit via `react-native-vision-camera-face-detector`) et zoom automatique cinématique : gros plan progressif sur le visage, maintien 4 s, puis retour sur la ou les personnes en entier. Réglage « Zoom auto sur les visages » dans Setup → Détection.
+- Tests unitaires de la géométrie de cadrage (`__tests__/framing.test.ts`), du redressement et du mapping « cover » (`__tests__/orientation.test.ts`) et du suivi des sujets (`__tests__/tracker.test.ts`) — 44 tests au total.
 
 ### Sécurité
 - Correction de 7 vulnérabilités modérées (`npm audit` : 7 → 0) : `fast-xml-parser < 5.7.0` ([GHSA-gh4j-gqv2-49f6](https://github.com/advisories/GHSA-gh4j-gqv2-49f6), injection XML/CDATA), atteint via `@react-native-community/cli-*` ≤ 20.1.1.
 
 ### Modifié
-- Dépendances de développement à jour : `@react-native-community/cli*` 20.0.0 → 20.2.0, `jest` 29 → 30, `@types/jest` 29 → 30.
-- CI sur Node 22 (au lieu de 20) et `engines.node` relevé à `>=20.19.4`, minimum exigé par `@react-native-community/cli` 20.2.0.
+- **Détection revue en profondeur** :
+  - le modèle reçoit maintenant **tout le champ de vision** au lieu d'un carré central (~44 % de la largeur n'était jamais analysée sur un capteur 16:9) ;
+  - l'image est **redressée** avant inférence — le détecteur recevait jusqu'ici un buffer paysage où les personnes apparaissent couchées, ce à quoi il n'est pas invariant ;
+  - passage de SSD MobileNet V1 (2018) à **EfficientDet-Lite0**, plus précis, et 25 détections par image au lieu de 10 ;
+  - **délégué GPU** avec repli automatique sur CPU si le modèle est refusé ;
+  - **suivi des sujets par IoU** : confirmation sur plusieurs images avant d'ouvrir un événement, tolérance aux occlusions brèves, et suivi de plusieurs personnes simultanément ;
+  - le **mode nuit** active désormais réellement `lowLightBoost` quand l'appareil le supporte (il n'était relié à rien).
 - Renommage du projet « Sentinelle » → **NovaGuard** (nom affiché, `applicationId` Android `com.novaguard`, dépôt, clés de stockage local).
 - La détection déclenchée par le timer factice a été retirée ; l'historique et le statut REC sont maintenant pilotés par de vraies détections.
 
 ### Connu
-- L'alignement de la zone de détection sur l'aperçu caméra repose sur une hypothèse de recadrage carré centré, non calibrée sur un appareil réel (voir la feuille de route du README).
-- Plusieurs dépendances restent volontairement en deçà de leur dernière majeure (VisionCamera 4 et non 5, ESLint 8, TypeScript 5, Babel 7…). Les raisons vérifiées sont détaillées dans [`CONTRIBUTING.md`](CONTRIBUTING.md#dépendances--ce-qui-est-volontairement-figé) — le verrou principal est `vision-camera-resize-plugin`, sans version compatible Nitro Modules.
+- Le sens de redressement (`uprightRotation`) suit la documentation de vision-camera mais n'a pas été confronté à un vrai capteur. Diagnostic si la détection est mauvaise sur appareil alors que les visages sont bien détectés (ML Kit pivote nativement, donc n'est pas affecté) : inverser `90deg` et `270deg` dans `src/camera/orientation.ts`.
+- Le zoom auto s'appuie sur ce même cadrage, plus l'hypothèse que le mode `autoMode` du détecteur de visages renvoie des coordonnées dans l'espace de la fenêtre qu'on lui passe. La géométrie est testée unitairement, mais la correspondance avec l'aperçu réel reste à confirmer sur appareil.
 
 ### À venir
 - Enregistrement vidéo réel et gestion du stockage (voir la feuille de route du README).
