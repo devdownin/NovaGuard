@@ -1,5 +1,4 @@
 import { DetectionEvent, Settings } from './types';
-import { SimulatedPermissions } from './storage';
 
 export const defaultSettings: Settings = {
   camera: 'Arrière (1×)',
@@ -20,10 +19,6 @@ export const defaultSettings: Settings = {
   sound: false,
   vibe: true,
   exp: { surv: true, det: false, rec: false, sto: false, not: false, about: false },
-};
-
-export const defaultSimulatedPermissions: SimulatedPermissions = {
-  notif: false,
 };
 
 /**

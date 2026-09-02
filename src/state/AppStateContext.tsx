@@ -9,7 +9,7 @@ import {
   Retention, Sensitivity, Settings, StorageInfo, Tab,
 } from './types';
 import {
-  defaultDetToday, defaultEvents, defaultLastDet, defaultSettings, defaultSimulatedPermissions,
+  defaultDetToday, defaultEvents, defaultLastDet, defaultSettings,
 } from './defaults';
 import { dropStaleKeys, storage } from './storage';
 import { daysAgo, formatClock, pad } from '../utils/date';
@@ -21,6 +21,10 @@ import {
   todayCount, totalBytes,
 } from '../recording/library';
 import { deleteFiles, orphanedRecordings, storageInfo } from '../recording/videoStore';
+import {
+  hasNotificationPermission, requestNotificationPermission, startForegroundService,
+  stopForegroundService,
+} from '../surveillance/foregroundService';
 
 interface AppStateValue {
   hydrated: boolean;
@@ -161,23 +165,31 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [info, setInfo] = useState<InfoPanel>(null);
 
   const [onb, setOnb] = useState<OnboardingStep>(null);
-  const [simPerms, setSimPerms] = useState(defaultSimulatedPermissions);
   const cameraPermission = useCameraPermission();
   const microphonePermission = useMicrophonePermission();
+  // POST_NOTIFICATIONS has no vision-camera hook; it is read once and then
+  // updated by grantPermission. Nothing else can change it while we run.
+  const [notifGranted, setNotifGranted] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    hasNotificationPermission().then(granted => {
+      if (!cancelled) setNotifGranted(granted);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const perms: Permissions = useMemo(() => ({
     cam: cameraPermission.hasPermission,
     mic: microphonePermission.hasPermission,
-    notif: simPerms.notif,
-  }), [cameraPermission.hasPermission, microphonePermission.hasPermission, simPerms]);
+    notif: notifGranted,
+  }), [cameraPermission.hasPermission, microphonePermission.hasPermission, notifGranted]);
 
   // ── hydrate from disk ────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [s, p, ev, dt, ld, onboarded] = await Promise.all([
+      const [s, ev, dt, ld, onboarded] = await Promise.all([
         storage.loadSettings(),
-        storage.loadPerms(),
         storage.loadEvents(),
         storage.loadDetToday(),
         storage.loadLastDet(),
@@ -185,7 +197,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       ]);
       if (cancelled) return;
       if (s) setSettings(s);
-      if (p) setSimPerms(p);
       if (ev) setEvents(ev);
       setDetToday(todayCount(dt, Date.now()));
       if (ld) setLastDet(ld);
@@ -203,7 +214,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   // ── persist on change (skip the initial hydration write) ───────────
   useEffect(() => { if (hydrated) storage.saveSettings(settings); }, [hydrated, settings]);
-  useEffect(() => { if (hydrated) storage.savePerms(simPerms); }, [hydrated, simPerms]);
   useEffect(() => { if (hydrated) storage.saveEvents(events); }, [hydrated, events]);
   useEffect(() => {
     if (hydrated) storage.saveDetToday({ count: detToday, day: Date.now() });
@@ -393,6 +403,17 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => cancelPostRoll, [cancelPostRoll]);
 
+  // The foreground service is what lets the camera keep running once the app
+  // leaves the screen; without it Android cuts capture and may kill the process.
+  useEffect(() => {
+    if (monitoring) startForegroundService();
+    else stopForegroundService();
+  }, [monitoring]);
+
+  // Leaving a "surveillance active" notification behind after the process is
+  // gone would be worse than not showing one at all.
+  useEffect(() => stopForegroundService, []);
+
   // ── retention & disk pressure ────────────────────────────────────────
   // Runs whenever the library changes: drops clips past the retention window,
   // then — if auto-delete is on and the volume is nearly full — the oldest
@@ -500,7 +521,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       microphonePermission.requestPermission();
       return;
     }
-    setSimPerms(p => ({ ...p, [key]: true }));
+    requestNotificationPermission().then(setNotifGranted);
   }, [cameraPermission, microphonePermission]);
 
   const value = useMemo<AppStateValue>(() => ({

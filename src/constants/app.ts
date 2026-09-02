@@ -25,5 +25,6 @@ export const THIRD_PARTY_LICENSES: ThirdPartyLicense[] = [
   { name: 'react-native-linear-gradient', note: 'Dégradés visuels', license: 'MIT' },
   { name: '@react-native-community/slider', note: 'Curseur du seuil de confiance', license: 'MIT' },
   { name: '@react-native-async-storage/async-storage', note: 'Sauvegarde locale des réglages', license: 'MIT' },
+  { name: 'AndroidX Core', note: 'Notification du service de premier plan', license: 'Apache-2.0' },
   { name: 'Inter', note: 'Police de caractères', license: 'SIL OFL 1.1' },
 ];

@@ -3,6 +3,18 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Optional: clips are recorded without audio until the user grants it. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!--
+      Foreground service. Without one, Android cuts camera access as soon as the
+      app stops being visible, so surveillance would only work on screen.
+      The `microphone` type is only claimed at runtime when RECORD_AUDIO is
+      actually granted — see SurveillanceService.foregroundTypes().
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <uses-feature android:name="android.hardware.camera.any" android:required="true" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
@@ -27,5 +39,10 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
       </activity>
+
+      <service
+        android:name=".surveillance.SurveillanceService"
+        android:exported="false"
+        android:foregroundServiceType="camera|microphone" />
     </application>
 </manifest>

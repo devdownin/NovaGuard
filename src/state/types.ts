@@ -51,8 +51,8 @@ export interface ExpandedSections {
   about: boolean;
 }
 
+/** All three are real OS permissions, re-read live and never persisted. */
 export interface Permissions {
-  /** Backed by the real OS camera permission (react-native-vision-camera) — not persisted, always re-read live. */
   cam: boolean;
   mic: boolean;
   notif: boolean;
@@ -92,7 +92,6 @@ export interface DayCount {
 
 export interface PersistedState {
   settings: Settings;
-  perms: Permissions;
   events: DetectionEvent[];
   detToday: DayCount;
   lastDet: string;

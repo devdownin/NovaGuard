@@ -1,9 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DayCount, DetectionEvent, Settings } from './types';
 
-/** Camera and microphone are real OS permissions, re-read live — only notif is simulated. */
-export type SimulatedPermissions = { notif: boolean };
-
 /**
  * `events` and `detToday` are versioned keys.
  *
@@ -14,14 +11,15 @@ export type SimulatedPermissions = { notif: boolean };
  */
 const KEYS = {
   settings: '@novaguard:settings',
-  perms: '@novaguard:perms',
   events: '@novaguard:events:v2',
   detToday: '@novaguard:detToday:v2',
   lastDet: '@novaguard:lastDet',
   onboardingComplete: '@novaguard:onboardingComplete',
 } as const;
 
-const STALE_KEYS = ['@novaguard:events', '@novaguard:detToday'];
+// '@novaguard:perms' held simulated mic/notification grants; all three
+// permissions are real OS state now, so the key has no meaning any more.
+const STALE_KEYS = ['@novaguard:events', '@novaguard:detToday', '@novaguard:perms'];
 
 /** Best-effort removal of the superseded keys so they don't sit there forever. */
 export async function dropStaleKeys(): Promise<void> {
@@ -53,9 +51,6 @@ async function writeJson(key: string, value: unknown): Promise<void> {
 export const storage = {
   loadSettings: () => readJson<Settings>(KEYS.settings),
   saveSettings: (v: Settings) => writeJson(KEYS.settings, v),
-
-  loadPerms: () => readJson<SimulatedPermissions>(KEYS.perms),
-  savePerms: (v: SimulatedPermissions) => writeJson(KEYS.perms, v),
 
   loadEvents: () => readJson<DetectionEvent[]>(KEYS.events),
   saveEvents: (v: DetectionEvent[]) => writeJson(KEYS.events, v),

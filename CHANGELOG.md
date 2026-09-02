@@ -7,13 +7,18 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et ce p
 ## [Non publié]
 
 ### Ajouté
+- **Service de premier plan** (`SurveillanceService`, TurboModule `SurveillanceService`) démarré avec la surveillance et arrêté avec elle. Sans lui Android coupe l'accès caméra dès que l'application quitte l'écran, et le processus devient candidat à la fermeture. Notification permanente en canal `IMPORTANCE_LOW`, silencieuse, masquée sur l'écran verrouillé (les images de surveillance sont sensibles) et ouvrant l'application au tap.
+  - Le type `microphone` n'est déclaré **qu'à l'exécution**, quand `RECORD_AUDIO` est réellement accordée : depuis Android 14, démarrer un service de premier plan avec un type dont la permission manque lève une `SecurityException`. L'audio étant optionnel dans NovaGuard, le jeu de types se décide à l'exécution.
+  - `START_NOT_STICKY` volontairement : la session caméra vit dans l'arbre de vues React, donc un service relancé seul par le système — sans Activity ni contexte JS — afficherait « surveillance active » sans rien enregistrer.
+- **Permission de notification réelle** (`POST_NOTIFICATIONS`) : c'était la dernière permission simulée. Le service tourne sans elle, mais sa notification est alors retenue silencieusement, ce qui laisserait la caméra active sans aucune indication visible. Toute la plomberie des permissions simulées (`SimulatedPermissions`, clé `@novaguard:perms`) a été supprimée — les trois permissions sont désormais de véritables états système.
 - **Enregistrement vidéo réel.** Une détection confirmée ouvre un clip MP4 (H.264) écrit dans le stockage privé de l'application ; l'évènement d'historique porte le chemin du fichier et sa taille réelle lue sur disque.
 - Lecture des enregistrements depuis le panneau de détail (`react-native-video`).
 - Permission micro réelle (`useMicrophonePermission` + `RECORD_AUDIO`) : l'audio n'est capté qu'une fois accordée.
 - Purge automatique par rétention, et récupération d'espace en supprimant les clips les plus anciens quand le volume passe sous 500 Mo libres.
 - Nettoyage au démarrage des clips orphelins — fichiers restés sur disque après un arrêt brutal, qu'aucun évènement ne référence.
 - Tests unitaires de la gestion des enregistrements (`__tests__/library.test.ts`).
-- Tests de démarrage et de chargement du modèle (`__tests__/startup.test.tsx`) : passage de l'écran de démarrage, hydratation depuis `AsyncStorage`, arrivée sur l'écran Surveillance, repli quand la caméra n'est pas autorisée, absence de données de démonstration, ignorance des anciennes clés `v1` — et, côté modèle, résolution de l'asset par Metro, choix du délégué GPU en premier, repli CPU, et échec signalé seulement quand les deux ont refusé. **77 tests au total.**
+- Tests du service de premier plan (`__tests__/foregroundService.test.ts`) : démarrage, arrêt, état, dégradation en no-op quand le module natif est absent, et gestion de la permission de notification. **87 tests au total.**
+- Tests de démarrage et de chargement du modèle (`__tests__/startup.test.tsx`) : passage de l'écran de démarrage, hydratation depuis `AsyncStorage`, arrivée sur l'écran Surveillance, repli quand la caméra n'est pas autorisée, absence de données de démonstration, ignorance des anciennes clés `v1` — et, côté modèle, résolution de l'asset par Metro, choix du délégué GPU en premier, repli CPU, et échec signalé seulement quand les deux ont refusé.
 - Flux caméra réel (`react-native-vision-camera`) à la place du placeholder de l'écran Surveillance.
 - Détection de personnes/animaux sur l'appareil via un modèle TensorFlow Lite embarqué (COCO), avec `react-native-fast-tflite` et `vision-camera-resize-plugin` dans un frame processor dédié.
 - Permission caméra réelle (demandée depuis l'onboarding et Setup → Confidentialité, au lieu d'être simulée).
@@ -55,7 +60,9 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et ce p
 ### Connu
 - Le sens de redressement (`uprightRotation`) suit la documentation de vision-camera mais n'a pas été confronté à un vrai capteur. Diagnostic si la détection est mauvaise sur appareil alors que les visages sont bien détectés (ML Kit pivote nativement, donc n'est pas affecté) : inverser `90deg` et `270deg` dans `src/camera/orientation.ts`.
 - **L'enregistrement n'a pas pu être exécuté sur un appareil** : cet environnement de build n'a ni SDK Android ni émulateur. La logique de rétention, de récupération d'espace et de formatage est couverte par des tests unitaires, mais la capture elle-même (`startRecording`, chemins de fichiers, permission micro, lecture) reste à valider en conditions réelles.
-- La surveillance ne fonctionne qu'application au premier plan : il n'y a pas encore de service de premier plan, donc l'enregistrement s'arrête quand l'écran s'éteint.
+- **Le service de premier plan n'a pas pu être compilé** : sans SDK Android ici, le code Kotlin et la génération codegen du TurboModule n'ont jamais été passés au compilateur. C'est le morceau le plus risqué de cette branche ; le wrapper JS dégrade en no-op si le module natif manque, donc une erreur de codegen se manifesterait par une surveillance limitée au premier plan, pas par un plantage.
+- Ce que le service garantit et ce qu'il ne garantit pas : il rend l'accès caméra en arrière-plan **autorisé** et empêche la fermeture du processus, et VisionCamera pilote son propre `LifecycleRegistry` depuis `isActive` plutôt que depuis l'Activity, donc la session survit au passage en arrière-plan. En revanche, la survie de la capture **écran éteint** dépend du sort de la surface d'aperçu et reste à confirmer sur appareil.
+- « Surveillance au démarrage » reste sans effet : cela demande un `BroadcastReceiver` sur `BOOT_COMPLETED`, désormais possible grâce au service mais pas encore implémenté.
 - Le zoom auto s'appuie sur ce même cadrage, plus l'hypothèse que le mode `autoMode` du détecteur de visages renvoie des coordonnées dans l'espace de la fenêtre qu'on lui passe. La géométrie est testée unitairement, mais la correspondance avec l'aperçu réel reste à confirmer sur appareil.
 
 ### Retiré
@@ -63,9 +70,10 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et ce p
 - Bouton « Partager » du panneau de détail : il était inerte, et un partage réel exige un `FileProvider` Android (voir la feuille de route).
 
 ### À venir
-- Service de premier plan pour surveiller écran éteint / application en arrière-plan.
+- Démarrage automatique de la surveillance au boot (`BOOT_COMPLETED`).
+- Bouton « Arrêter » dans la notification (demande un événement natif → JS, écarté ici pour ne pas risquer une désynchronisation d'état).
 - Partage d'un enregistrement via un `FileProvider`.
-- Notifications système réelles.
+- Notifications à chaque détection.
 
 ## [1.0.0] - 2026-09-01
 

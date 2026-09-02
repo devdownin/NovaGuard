@@ -11,6 +11,7 @@ Caméra de surveillance intelligente, locale et open source. NovaGuard transform
 - **Détection sur l'appareil** — personnes et animaux, reconnus en local par EfficientDet-Lite0 (TensorFlow Lite, COCO) sur **tout** le champ de vision et sur une image redressée. Suivi multi-sujets : chaque personne présente est encadrée, avec son niveau de confiance. Un sujet doit être vu sur plusieurs images consécutives avant de déclencher un événement, et survit à une occlusion brève sans couper l'événement en deux.
 - **Zoom auto sur les visages** — quand un visage est détecté (ML Kit), le cadrage glisse doucement en gros plan, s'y maintient 4 s, puis revient sur la ou les personnes en entier. Mouvement animé sur le driver natif, donc insensible à la charge de l'inférence. Désactivable dans Setup → Détection.
 - **Enregistrement** — chaque détection confirmée écrit un clip MP4 (H.264) dans le stockage privé de l'application : aucune permission de stockage, rien dans la galerie partagée, tout disparaît à la désinstallation. La qualité (720p/1080p/4K), la durée après détection et la durée maximale d'un clip sont réglables ; au-delà du maximum le clip est coupé et la suite enregistrée dans un segment suivant.
+- **Surveillance en arrière-plan** — un service de premier plan de type `camera` (plus `microphone` quand la permission est accordée) démarre avec la surveillance : Android autorise alors la caméra hors écran et ne ferme pas le processus. Une notification permanente et silencieuse indique que la caméra est active ; elle est masquée sur l'écran verrouillé.
 - **Gestion du stockage** — rétention configurable (1 à 90 jours, ou toujours), suppression automatique des clips les plus anciens quand le volume passe sous 500 Mo libres, espace réellement mesuré sur l'appareil, et nettoyage au démarrage des fichiers qu'aucun évènement ne référence plus.
 - **Historique** — événements enregistrés sous forme de cartes, filtrables par type et par période, avec détail complet (lecture de la vidéo, confiance, taille réelle, suppression) en panneau.
 - **Setup** — réglages de surveillance, détection, enregistrement, stockage et notifications regroupés par sections repliables ; la sensibilité et le seuil de confiance pilotent directement le pipeline de détection.
@@ -54,6 +55,8 @@ src/
   state/        état applicatif (contexte React), types, valeurs par défaut, persistance
   camera/       sélection du device caméra, géométrie de cadrage et machine à états du zoom auto
   recording/    capture des clips, rétention, récupération d'espace et accès disque
+  surveillance/ pilotage du service de premier plan et permission de notification
+  specs/        specs TurboModule (codegen) des modules natifs de l'application
   ml/           décodage des sorties du modèle TFLite, labels COCO, suivi des sujets (IoU)
   constants/    métadonnées de l'application (version, licence, dépôt)
   utils/        fonctions utilitaires (dates)
@@ -70,9 +73,11 @@ assets/store/   icône source et icône 512×512 pour les fiches store
 - [x] Détection de personnes/animaux sur l'appareil (TensorFlow Lite)
 - [x] Enregistrement vidéo réel et gestion du stockage
 - [ ] Vérifier sur un vrai appareil le sens de redressement des images (`src/camera/orientation.ts`), l'alignement des cadres et toute la chaîne d'enregistrement — la géométrie et la gestion du stockage sont couvertes par des tests unitaires, mais ni la convention d'orientation du capteur ni la capture elle-même ne le sont
-- [ ] Service de premier plan, pour surveiller écran éteint ou application en arrière-plan
+- [x] Service de premier plan, pour que la caméra reste autorisée hors écran
+- [ ] Confirmer sur appareil que la capture survit à l'écran éteint (le service rend l'accès caméra autorisé ; le sort de la surface d'aperçu reste à vérifier)
+- [ ] Démarrage automatique de la surveillance au boot (`BOOT_COMPLETED`)
 - [ ] Partage d'un enregistrement (nécessite un `FileProvider` Android)
-- [ ] Notifications système réelles
+- [ ] Notifications à chaque détection
 
 ## Contribuer
 
