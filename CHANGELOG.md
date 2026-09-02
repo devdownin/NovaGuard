@@ -17,6 +17,9 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et ce p
 - Détection de visages (ML Kit via `react-native-vision-camera-face-detector`) et zoom automatique cinématique : gros plan progressif sur le visage, maintien 4 s, puis retour sur la ou les personnes en entier. Réglage « Zoom auto sur les visages » dans Setup → Détection.
 - Tests unitaires de la géométrie de cadrage (`__tests__/framing.test.ts`), du redressement et du mapping « cover » (`__tests__/orientation.test.ts`) et du suivi des sujets (`__tests__/tracker.test.ts`) — 44 tests au total.
 
+### Sécurité
+- Correction de 7 vulnérabilités modérées (`npm audit` : 7 → 0) : `fast-xml-parser < 5.7.0` ([GHSA-gh4j-gqv2-49f6](https://github.com/advisories/GHSA-gh4j-gqv2-49f6), injection XML/CDATA), atteint via `@react-native-community/cli-*` ≤ 20.1.1.
+
 ### Modifié
 - **Détection revue en profondeur** :
   - le modèle reçoit maintenant **tout le champ de vision** au lieu d'un carré central (~44 % de la largeur n'était jamais analysée sur un capteur 16:9) ;
