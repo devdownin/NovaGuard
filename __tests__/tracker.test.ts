@@ -3,7 +3,14 @@
  */
 
 import {
-  confirmedTracks, DEFAULT_TRACKER_OPTIONS, iou, primaryTrack, resetTrackIds, Track, updateTracks,
+  confirmedTracks,
+  DEFAULT_TRACKER_OPTIONS,
+  iou,
+  primaryTrack,
+  resetTrackIds,
+  sameVisibleTracks,
+  Track,
+  updateTracks,
 } from '../src/ml/tracker';
 import { FrameDetection } from '../src/ml/types';
 
@@ -178,5 +185,30 @@ describe('primaryTrack', () => {
     tracks = updateTracks(tracks, [], 1100 + DEFAULT_TRACKER_OPTIONS.dropAfterMs);
     expect(tracks).toHaveLength(0);
     expect(primaryTrack(tracks)).toBeNull();
+  });
+});
+
+describe('sameVisibleTracks', () => {
+  it('holds for an unchanged list, whatever the array identity', () => {
+    let tracks = updateTracks([], [person(0.3)], 1000);
+    tracks = updateTracks(tracks, [person(0.3)], 1100);
+    expect(sameVisibleTracks(confirmedTracks(tracks), confirmedTracks(tracks))).toBe(true);
+    expect(sameVisibleTracks([], [])).toBe(true);
+  });
+
+  it('breaks as soon as a box moves', () => {
+    let tracks = updateTracks([], [person(0.3)], 1000);
+    tracks = updateTracks(tracks, [person(0.3)], 1100);
+    const before = confirmedTracks(tracks);
+    // Overlapping enough to continue the same track, far enough to redraw it.
+    const after = confirmedTracks(updateTracks(tracks, [person(0.36)], 1200));
+    expect(sameVisibleTracks(before, after)).toBe(false);
+  });
+
+  it('breaks when a subject joins or leaves', () => {
+    let tracks = updateTracks([], [person(0.1)], 1000);
+    tracks = updateTracks(tracks, [person(0.1)], 1100);
+    const one = confirmedTracks(tracks);
+    expect(sameVisibleTracks(one, [])).toBe(false);
   });
 });

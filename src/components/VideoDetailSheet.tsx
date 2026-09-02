@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import Video from 'react-native-video';
@@ -12,7 +12,13 @@ import { SecondaryOutlineButton, TextButton } from './OutlineButton';
 
 export function VideoDetailSheet() {
   const { events, selected, selectEvent, askDelete } = useAppState();
-  const event = events.find(e => e.id === selected) ?? null;
+  // Memoised: this sheet stays mounted for the whole session, so the lookup ran
+  // over the entire history on every provider render — including the ones the
+  // frame processor triggers while surveillance is on.
+  const event = useMemo(
+    () => events.find(e => e.id === selected) ?? null,
+    [events, selected],
+  );
   const [playing, setPlaying] = useState(false);
 
   // Never carry playback over from the previously opened event.

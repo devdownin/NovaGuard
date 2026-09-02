@@ -12,13 +12,13 @@ import {
   defaultDetToday, defaultEvents, defaultLastDet, defaultSettings,
 } from './defaults';
 import { dropStaleKeys, storage } from './storage';
-import { daysAgo, formatClock, pad } from '../utils/date';
-import { DetectionBox, FrameDetection } from '../ml/types';
-import { confirmedTracks, primaryTrack, Track, updateTracks } from '../ml/tracker';
+import { formatClock, pad, periodRange } from '../utils/date';
+import { FrameDetection } from '../ml/types';
+import { confirmedTracks, primaryTrack, sameVisibleTracks, Track, updateTracks } from '../ml/tracker';
 import { Clip, useRecorder } from '../recording/useRecorder';
 import {
   bytesToReclaim, clipFileName, clipOutcome, eventsToReclaim, expiredEvents, MIN_FREE_BYTES,
-  postRollMs, sameDay, todayCount, totalBytes,
+  nextEventId, postRollMs, sameDay, todayCount, totalBytes,
 } from '../recording/library';
 import {
   deleteFiles, orphanedRecordings, renameRecording, storageInfo,
@@ -39,17 +39,6 @@ interface AppStateValue {
 
   // surveillance
   monitoring: boolean;
-  det: DetectionKind | null;
-  conf: number;
-  box: DetectionBox | null;
-  /** Every confirmed subject currently in frame, for the overlay. */
-  tracks: Track[];
-  /** Which of those tracks is driving the recording session. */
-  primaryTrackId: number | null;
-  /** Aspect ratio (w/h) of the uprighted camera frame, for mapping boxes onto the preview. */
-  frameAspect: number;
-  recSec: number;
-  clock: string;
   detToday: number;
   lastDet: string;
   /** True only while a clip is actually being written to disk. */
@@ -121,7 +110,29 @@ interface AppStateValue {
   grantPermission: (key: keyof Permissions) => void;
 }
 
+/**
+ * State that changes at the frame-processor rate, kept out of {@link AppStateValue}.
+ *
+ * Everything here is redrawn up to five times a second while surveillance runs.
+ * Carrying it in the main context meant every consumer — `CameraFeed`, the tab
+ * bar, the sheets, the confirm dialogs — re-rendered at that rate, since a new
+ * context value re-renders all of its consumers regardless of which field
+ * changed. Only the viewfinder actually reads any of it.
+ */
+export interface ViewfinderState {
+  det: DetectionKind | null;
+  /** Every confirmed subject currently in frame, for the overlay. */
+  tracks: Track[];
+  /** Which of those tracks is driving the recording session. */
+  primaryTrackId: number | null;
+  /** Aspect ratio (w/h) of the uprighted camera frame, for mapping boxes onto the preview. */
+  frameAspect: number;
+  recSec: number;
+  clock: string;
+}
+
 const AppStateCtx = createContext<AppStateValue | null>(null);
+const ViewfinderCtx = createContext<ViewfinderState | null>(null);
 
 function cycle<T>(options: readonly T[], current: T): T {
   const i = options.indexOf(current);
@@ -154,8 +165,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   const [monitoring, setMonitoring] = useState(false);
   const [det, setDet] = useState<DetectionKind | null>(null);
-  const [conf, setConf] = useState(0);
-  const [box, setBox] = useState<DetectionBox | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [primaryTrackId, setPrimaryTrackId] = useState<number | null>(null);
   const [frameAspect, setFrameAspect] = useState(9 / 16);
@@ -301,6 +310,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const postRollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** When the last detection alert went out, for the cooldown. */
   const lastAlertRef = useRef<number | null>(null);
+  /**
+   * Post-roll length, read through a ref for the same reason as the alert
+   * switches: as a dependency it made `reportDetections` — and therefore the
+   * frame processor worklet — rebuild whenever the setting changed.
+   */
+  const postRollLenRef = useRef(settings.post);
+  useEffect(() => { postRollLenRef.current = settings.post; }, [settings.post]);
 
   const commitEvent = useCallback((
     kind: DetectionKind, dur: number, c: number, clip: Clip | null, at: number = Date.now(),
@@ -310,7 +326,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     setLastDet(pad(new Date(now).getHours()) + ':' + pad(new Date(now).getMinutes()));
     setEvents(evs => [
       {
-        id: now,
+        // Derived from the list so two clips filed in the same millisecond
+        // cannot share an id — see `nextEventId`.
+        id: nextEventId(evs[0]?.id, now),
         kind,
         timestamp: now,
         // Prefer the encoder's own duration: it counts what is actually in the
@@ -327,7 +345,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const clearSession = useCallback(() => {
     sessionKindRef.current = null;
     setDet(null);
-    setBox(null);
     setRecSec(0);
   }, []);
 
@@ -430,8 +447,11 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
     const next = updateTracks(tracksRef.current, detections, Date.now());
     tracksRef.current = next;
+    // Identity-preserving: `confirmedTracks` allocates every frame, and a new
+    // array is a new context value, which re-renders the whole tree — including
+    // `CameraFeed` — at up to 5 Hz even with an empty scene.
     const visible = confirmedTracks(next);
-    setTracks(visible);
+    setTracks(prev => (sameVisibleTracks(prev, visible) ? prev : visible));
 
     const primary = primaryTrack(next);
     setPrimaryTrackId(primary ? primary.id : null);
@@ -467,8 +487,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         setRecSec(Math.floor((Date.now() - sessionStartRef.current) / 1000));
       }
       setDet(primary.kind);
-      setConf(Math.round(primary.confidence * 100));
-      setBox(primary.box);
       return;
     }
 
@@ -479,9 +497,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       postRollRef.current = setTimeout(() => {
         postRollRef.current = null;
         endSession();
-      }, postRollMs(settings.post));
+      }, postRollMs(postRollLenRef.current));
     }
-  }, [cancelPostRoll, endSession, settings.post, startRecording]);
+  }, [cancelPostRoll, endSession, startRecording]);
 
   const toggleMonitoring = useCallback(() => {
     // Closing the session has to happen outside the updater: React may invoke
@@ -661,7 +679,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AppStateValue>(() => ({
     hydrated,
     tab, setTab,
-    monitoring, det, conf, box, tracks, primaryTrackId, frameAspect, recSec, clock, detToday, lastDet,
+    monitoring, detToday, lastDet,
     recording: isRecording, recError, storage: store, cameraRef, reportCameraProblem,
     toggleMonitoring, reportDetections,
     events, filter, setFilter, period, setPeriod, periodOpen, togglePeriodOpen, selected, selectEvent,
@@ -673,7 +691,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     info, openInfo, closeInfo,
     onb, perms, onbNext, onbFinish, grantPermission,
   }), [
-    hydrated, tab, monitoring, det, conf, box, tracks, primaryTrackId, frameAspect, recSec, clock, detToday, lastDet,
+    hydrated, tab, monitoring, detToday, lastDet,
     isRecording, recError, store, cameraRef, reportCameraProblem, toggleMonitoring, reportDetections,
     events, filter, period, periodOpen, togglePeriodOpen, selected, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete, confirmWipe, askWipe, cancelWipe, doWipe,
@@ -683,7 +701,24 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     info, openInfo, closeInfo, onb, perms, onbNext, onbFinish, grantPermission,
   ]);
 
-  return <AppStateCtx.Provider value={value}>{children}</AppStateCtx.Provider>;
+  const viewfinderValue = useMemo<ViewfinderState>(
+    () => ({ det, tracks, primaryTrackId, frameAspect, recSec, clock }),
+    [det, tracks, primaryTrackId, frameAspect, recSec, clock],
+  );
+
+  // `children` is the same element on every render, so React skips the subtree
+  // and only the consumers of whichever value actually changed re-render.
+  return (
+    <AppStateCtx.Provider value={value}>
+      <ViewfinderCtx.Provider value={viewfinderValue}>{children}</ViewfinderCtx.Provider>
+    </AppStateCtx.Provider>
+  );
+}
+
+export function useViewfinderState(): ViewfinderState {
+  const ctx = useContext(ViewfinderCtx);
+  if (!ctx) throw new Error('useViewfinderState must be used within AppStateProvider');
+  return ctx;
 }
 
 export function useAppState(): AppStateValue {
@@ -694,14 +729,13 @@ export function useAppState(): AppStateValue {
 
 export function useFilteredEvents(): { shown: DetectionEvent[]; totalCount: number } {
   const { events, filter, period } = useAppState();
-  const shown = useMemo(() => events.filter(e => {
-    if (filter === 'Personnes' && e.kind !== 'Personne') return false;
-    if (filter === 'Animaux' && e.kind !== 'Animal') return false;
-    const diff = daysAgo(e.timestamp);
-    if (period === "Aujourd'hui" && diff !== 0) return false;
-    if (period === '7 jours' && diff > 6) return false;
-    if (period === '30 jours' && diff > 29) return false;
-    return true;
-  }), [events, filter, period]);
+  const shown = useMemo(() => {
+    const { from, to } = periodRange(period, Date.now());
+    return events.filter(e => {
+      if (filter === 'Personnes' && e.kind !== 'Personne') return false;
+      if (filter === 'Animaux' && e.kind !== 'Animal') return false;
+      return e.timestamp >= from && e.timestamp < to;
+    });
+  }, [events, filter, period]);
   return { shown, totalCount: events.length };
 }

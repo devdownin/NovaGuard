@@ -161,6 +161,30 @@ export function confirmedTracks(tracks: Track[]): Track[] {
   return tracks.filter(t => t.confirmed);
 }
 
+/**
+ * True when two confirmed-track lists would draw the exact same overlay.
+ *
+ * `updateTracks` and `confirmedTracks` both return a fresh array every frame, so
+ * handing their result straight to `setState` re-rendered the whole provider —
+ * and therefore `CameraFeed`, the sheets and the tab bar — at the frame-processor
+ * rate, including while nothing at all was in frame. Comparing the drawn fields
+ * lets the caller keep the previous array when nothing moved.
+ */
+export function sameVisibleTracks(a: Track[], b: Track[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (x.id !== y.id || x.kind !== y.kind || x.confidence !== y.confidence) return false;
+    if (
+      x.box.x !== y.box.x || x.box.y !== y.box.y ||
+      x.box.width !== y.box.width || x.box.height !== y.box.height
+    ) return false;
+  }
+  return true;
+}
+
 /** The track the UI treats as the subject: highest confidence among confirmed. */
 export function primaryTrack(tracks: Track[]): Track | null {
   let best: Track | null = null;

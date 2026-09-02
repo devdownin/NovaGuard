@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { color, font } from '../theme';
-import { useAppState } from '../state/AppStateContext';
+import { useAppState, useViewfinderState } from '../state/AppStateContext';
 import { useAutoZoom } from '../camera/useAutoZoom';
 import { uprightBoxToViewBox } from '../camera/framing';
 import { formatDuration } from '../utils/date';
@@ -51,9 +51,11 @@ function RecDot() {
 
 export function Viewfinder() {
   const {
-    monitoring, det, tracks, primaryTrackId, frameAspect, recSec, clock, perms, settings,
-    recording, recError, cameraRef, reportCameraProblem,
+    monitoring, perms, settings, recording, recError, cameraRef, reportCameraProblem,
   } = useAppState();
+  // Separate context: this is the only subscriber to the per-frame state, so
+  // nothing else in the tree re-renders when a detection box moves.
+  const { det, tracks, primaryTrackId, frameAspect, recSec, clock } = useViewfinderState();
 
   const [size, setSize] = useState({ width: 0, height: 0 });
   const onLayout = useCallback((e: LayoutChangeEvent) => {

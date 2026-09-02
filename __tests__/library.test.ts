@@ -1,7 +1,20 @@
 import {
-  bytesToReclaim, clipFileName, clipOutcome, eventsToReclaim, expiredEvents, formatBytes, LOW_SPACE_BYTES,
-  maxDurationMs, postRollMs, qualityBitRate, qualityResolution, retentionDays,
-  sameDay, todayCount, totalBytes,
+  bytesToReclaim,
+  clipFileName,
+  clipOutcome,
+  eventsToReclaim,
+  expiredEvents,
+  formatBytes,
+  LOW_SPACE_BYTES,
+  maxDurationMs,
+  nextEventId,
+  postRollMs,
+  qualityBitRate,
+  qualityResolution,
+  retentionDays,
+  sameDay,
+  todayCount,
+  totalBytes,
 } from '../src/recording/library';
 import { DetectionEvent } from '../src/state/types';
 
@@ -202,5 +215,20 @@ describe('clipOutcome', () => {
       clipOutcome(false, 1), clipOutcome(false, 0),
     ]);
     expect([...seen].sort()).toEqual(['attach', 'discard', 'event-only']);
+  });
+});
+
+describe('nextEventId', () => {
+  it('uses the timestamp when nothing collides', () => {
+    expect(nextEventId(undefined, 1_000)).toBe(1_000);
+    expect(nextEventId(900, 1_000)).toBe(1_000);
+  });
+
+  // Two clips filed through the async rename in the same millisecond used to
+  // share an id: duplicate FlatList keys, and deleting one unlinked the other's
+  // file while its row stayed in the history.
+  it('steps past an id already taken in the same millisecond', () => {
+    expect(nextEventId(1_000, 1_000)).toBe(1_001);
+    expect(nextEventId(1_001, 1_000)).toBe(1_002);
   });
 });

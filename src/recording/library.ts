@@ -116,6 +116,19 @@ export function clipFileName(kind: DetectionKind, at: number): string {
   return `${kind}_${date}_${time}.mp4`;
 }
 
+/**
+ * Id for a new event, given the newest one already in the list.
+ *
+ * Ids were `Date.now()` alone. Clips are filed through an async rename, so two
+ * finishing together produced the same id — duplicate `FlatList` keys, and a
+ * delete or a retention sweep that removed both rows and unlinked a clip the
+ * surviving event still pointed at. Monotonic per list, and still a timestamp
+ * in the ordinary case.
+ */
+export function nextEventId(latestId: number | undefined, now: number): number {
+  return latestId != null && latestId >= now ? latestId + 1 : now;
+}
+
 export function totalBytes(events: DetectionEvent[]): number {
   return events.reduce((sum, e) => sum + (e.bytes > 0 ? e.bytes : 0), 0);
 }

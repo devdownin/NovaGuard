@@ -37,19 +37,29 @@ export async function fileSize(path: string): Promise<number> {
  * otherwise do.
  */
 export async function renameRecording(from: string, filename: string): Promise<string> {
-  const to = `${RECORDINGS_DIR}/${filename}`;
-  if (to === from) return from;
   try {
-    if (await exists(to)) {
-      const unique = filename.replace(/\.mp4$/, `_${Date.now() % 1000}.mp4`);
-      await moveFile(from, `${RECORDINGS_DIR}/${unique}`);
-      return `${RECORDINGS_DIR}/${unique}`;
-    }
-    await moveFile(from, to);
-    return to;
+    // Walk suffixes until one is free. The previous `_${Date.now() % 1000}`
+    // suffix was itself collision-prone: two clips renamed in the same
+    // millisecond produced the same name, and `moveFile` overwrites — so the
+    // first clip was destroyed while its event went on pointing at the path.
+    const target = await freeName(from, filename);
+    if (target === from) return from;
+    await moveFile(from, target);
+    return target;
   } catch {
     return from;
   }
+}
+
+/** First unused path for `filename`, or `from` if the clip is already there. */
+async function freeName(from: string, filename: string): Promise<string> {
+  const base = filename.replace(/\.mp4$/, '');
+  for (let n = 0; n < 100; n++) {
+    const candidate = `${RECORDINGS_DIR}/${n === 0 ? base : `${base}_${n}`}.mp4`;
+    if (candidate === from) return from;
+    if (!(await exists(candidate))) return candidate;
+  }
+  return `${RECORDINGS_DIR}/${base}_${Date.now()}.mp4`;
 }
 
 export async function deleteFile(path: string | null): Promise<void> {
@@ -61,8 +71,23 @@ export async function deleteFile(path: string | null): Promise<void> {
   }
 }
 
+/**
+ * Bound on concurrent unlinks. `Promise.all` over the raw list issued one
+ * `exists` + `unlink` pair per clip at once — "tout supprimer" on a long
+ * history fired thousands of native calls in one tick, which stalls the JS
+ * thread and can exhaust the FS module's thread pool mid-wipe.
+ */
+const DELETE_CONCURRENCY = 8;
+
 export async function deleteFiles(paths: (string | null)[]): Promise<void> {
-  await Promise.all(paths.map(deleteFile));
+  const queue = paths.filter((p): p is string => !!p);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < queue.length) await deleteFile(queue[cursor++]);
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(DELETE_CONCURRENCY, queue.length) }, worker),
+  );
 }
 
 /** Absolute paths of every clip currently on disk. */
