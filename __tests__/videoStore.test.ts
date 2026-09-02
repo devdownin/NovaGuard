@@ -10,7 +10,9 @@
  */
 
 import * as fs from '@dr.pogodin/react-native-fs';
-import { deleteFiles, RECORDINGS_DIR, renameRecording } from '../src/recording/videoStore';
+import {
+  DELETE_CONCURRENCY, deleteFiles, RECORDINGS_DIR, renameRecording,
+} from '../src/recording/videoStore';
 
 const mockFs = fs as jest.Mocked<typeof fs>;
 const ORIGINAL = `${RECORDINGS_DIR}/6F2A1C9E-cam.mp4`;
@@ -36,11 +38,35 @@ it('does nothing when the clip is already correctly named', async () => {
 it('never overwrites an existing clip', async () => {
   // Two events can land in the same second — a passage cut by the duration cap
   // and immediately reopened, for one.
-  mockFs.exists.mockResolvedValue(true);
+  const taken = new Set([`${RECORDINGS_DIR}/Personne_2026-09-02_14-32-07.mp4`]);
+  mockFs.exists.mockImplementation(async (p: string) => taken.has(p));
+
   const path = await renameRecording(ORIGINAL, 'Personne_2026-09-02_14-32-07.mp4');
-  expect(path).not.toBe(`${RECORDINGS_DIR}/Personne_2026-09-02_14-32-07.mp4`);
-  expect(path).toMatch(/Personne_2026-09-02_14-32-07_\d+\.mp4$/);
+
+  expect(path).toBe(`${RECORDINGS_DIR}/Personne_2026-09-02_14-32-07_1.mp4`);
   expect(mockFs.moveFile).toHaveBeenCalledWith(ORIGINAL, path);
+});
+
+it('walks past every name already taken', async () => {
+  const taken = new Set([
+    `${RECORDINGS_DIR}/Personne_2026-09-02_14-32-07.mp4`,
+    `${RECORDINGS_DIR}/Personne_2026-09-02_14-32-07_1.mp4`,
+  ]);
+  mockFs.exists.mockImplementation(async (p: string) => taken.has(p));
+
+  await expect(renameRecording(ORIGINAL, 'Personne_2026-09-02_14-32-07.mp4'))
+    .resolves.toBe(`${RECORDINGS_DIR}/Personne_2026-09-02_14-32-07_2.mp4`);
+});
+
+// The old fallback minted a timestamp-suffixed name and moved onto it unchecked
+// — the very overwrite the suffix walk exists to prevent. With no free name the
+// clip keeps the one it has, which loses nothing.
+it('keeps the original name rather than inventing one when every name is taken', async () => {
+  mockFs.exists.mockResolvedValue(true);
+
+  await expect(renameRecording(ORIGINAL, 'Personne_2026-09-02_14-32-07.mp4'))
+    .resolves.toBe(ORIGINAL);
+  expect(mockFs.moveFile).not.toHaveBeenCalled();
 });
 
 it('keeps the recording under its original name if the move fails', async () => {
@@ -55,37 +81,8 @@ it('survives a filesystem that cannot even answer whether the name is taken', as
     .resolves.toBe(ORIGINAL);
 });
 
-describe('name collisions', () => {
-  // The old `_${Date.now() % 1000}` suffix collided with itself, and `moveFile`
-  // overwrites: the first clip was destroyed while its event kept pointing at
-  // the path it used to occupy.
-  it('walks past every name already taken', async () => {
-    const taken = new Set([
-      `${RECORDINGS_DIR}/Personne_2026-09-02_14-32-07.mp4`,
-      `${RECORDINGS_DIR}/Personne_2026-09-02_14-32-07_1.mp4`,
-    ]);
-    mockFs.exists.mockImplementation(async (p: string) => taken.has(p));
-
-    const path = await renameRecording(ORIGINAL, 'Personne_2026-09-02_14-32-07.mp4');
-
-    expect(path).toBe(`${RECORDINGS_DIR}/Personne_2026-09-02_14-32-07_2.mp4`);
-    expect(mockFs.moveFile).toHaveBeenCalledWith(ORIGINAL, path);
-  });
-
-  it('never asks moveFile to overwrite an existing clip', async () => {
-    mockFs.exists.mockImplementation(async (p: string) =>
-      p === `${RECORDINGS_DIR}/Animal_2026-09-02_10-00-00.mp4`);
-
-    const path = await renameRecording(ORIGINAL, 'Animal_2026-09-02_10-00-00.mp4');
-
-    expect(path).not.toBe(`${RECORDINGS_DIR}/Animal_2026-09-02_10-00-00.mp4`);
-    expect(mockFs.moveFile).toHaveBeenCalledWith(ORIGINAL, path);
-  });
-});
-
 describe('deleteFiles', () => {
-  it('unlinks every clip, skipping the ones with no file', async () => {
-    mockFs.exists.mockResolvedValue(true);
+  it('unlinks every clip, skipping the ones with no path', async () => {
     const paths = Array.from({ length: 40 }, (_, i) => `${RECORDINGS_DIR}/bulk-${i}.mp4`);
 
     await deleteFiles([...paths, null]);
@@ -95,7 +92,6 @@ describe('deleteFiles', () => {
   });
 
   it('never has more than DELETE_CONCURRENCY unlinks in flight', async () => {
-    mockFs.exists.mockResolvedValue(true);
     let inFlight = 0;
     let peak = 0;
     mockFs.unlink.mockImplementation(async () => {
@@ -107,7 +103,7 @@ describe('deleteFiles', () => {
 
     await deleteFiles(Array.from({ length: 200 }, (_, i) => `${RECORDINGS_DIR}/x-${i}.mp4`));
 
-    expect(peak).toBeLessThanOrEqual(8);
+    expect(peak).toBeLessThanOrEqual(DELETE_CONCURRENCY);
     expect(mockFs.unlink).toHaveBeenCalledTimes(200);
   });
 });

@@ -52,7 +52,7 @@ interface CameraFeedProps {
  * Returns null if there's no permission or no matching device — the caller
  * (Viewfinder) falls back to the decorative standby view in that case.
  */
-function CameraFeedInner({
+export function CameraFeed({
   style, active, viewWidth, viewHeight, onFrame, cameraRef, onProblem,
 }: CameraFeedProps) {
   const { perms, settings, reportDetections } = useAppState();
@@ -181,11 +181,3 @@ function CameraFeedInner({
     />
   );
 }
-
-/**
- * Memoised: the viewfinder re-renders on every analysed frame to move the
- * detection boxes, and re-rendering the camera with it rebuilt the face
- * detector's options object and re-evaluated the format on each one. Every prop
- * here is stable across those renders.
- */
-export const CameraFeed = React.memo(CameraFeedInner);

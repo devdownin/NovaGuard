@@ -1,5 +1,3 @@
-import { Period } from '../state/types';
-
 const MONTHS_FR = [
   'janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin',
   'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.',
@@ -9,9 +7,22 @@ export function pad(n: number): string {
   return n < 10 ? '0' + n : '' + n;
 }
 
-function startOfDay(ts: number): number {
+export function startOfDay(ts: number): number {
   const d = new Date(ts);
   d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/**
+ * Midnight `days` calendar days before the day `ts` falls in.
+ *
+ * Walks days with `setDate` rather than subtracting 86 400 000 ms: across a
+ * daylight-saving change the ms form lands an hour off, which drags the wrong
+ * evening's clips into a retention sweep or a history filter.
+ */
+export function startOfDayBefore(ts: number, days: number): number {
+  const d = new Date(startOfDay(ts));
+  d.setDate(d.getDate() - days);
   return d.getTime();
 }
 
@@ -47,30 +58,4 @@ export function formatClock(d: Date): string {
 export function formatDuration(seconds: number): string {
   const total = Math.max(0, Math.round(seconds));
   return Math.floor(total / 60) + ':' + pad(total % 60);
-}
-
-/**
- * Epoch-ms window a history period covers, as `[from, to)`.
- *
- * Derived once per filter pass instead of calling `daysAgo` per event: that
- * allocated three `Date` objects for every row, on every render of a screen
- * whose provider re-renders while surveillance is on.
- *
- * The boundaries walk calendar days via `setDate` rather than subtracting
- * 86 400 000 ms, so a daylight-saving change does not shift them by an hour and
- * pull the wrong evening's clips into the window.
- */
-export function periodRange(period: Period, now: number): { from: number; to: number } {
-  const days = period === "Aujourd'hui" ? 0 : period === '7 jours' ? 6 : period === '30 jours' ? 29 : null;
-
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  // Exclusive upper bound: an event stamped in the future belongs to no period.
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-  const to = end.getTime();
-
-  if (days == null) return { from: -Infinity, to };
-  start.setDate(start.getDate() - days);
-  return { from: start.getTime(), to };
 }

@@ -1,3 +1,7 @@
+// Europe/Paris rather than the runner's UTC: NovaGuard's day boundaries are
+// local, and on UTC a daylight-saving bug in them cannot fail a test.
+process.env.TZ = 'Europe/Paris';
+
 module.exports = {
   preset: 'react-native',
   // NovaGuard is Android-only. Without this the preset resolves `.ios.js`

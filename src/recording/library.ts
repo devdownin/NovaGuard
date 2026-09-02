@@ -1,4 +1,5 @@
-import { DetectionEvent, DetectionKind, MaxDuration, PostRoll, Quality, Retention } from '../state/types';
+import { DetectionEvent, DetectionKind, MaxDuration, Period, PostRoll, Quality, Retention } from '../state/types';
+import { startOfDayBefore } from '../utils/date';
 
 /**
  * Pure logic behind recording and storage management: how long a clip may run,
@@ -32,6 +33,36 @@ export function retentionDays(retention: Retention): number | null {
     case 'Toujours': return null;
     default: return null;
   }
+}
+
+/**
+ * How many days back a history period reaches, counting the current day as 0.
+ * `null` means "Tout" — no lower bound.
+ */
+export function periodDays(period: Period): number | null {
+  switch (period) {
+    case "Aujourd'hui": return 0;
+    case '7 jours': return 6;
+    case '30 jours': return 29;
+    case 'Tout': return null;
+    default: return null;
+  }
+}
+
+/**
+ * Epoch-ms window a history period covers, as `[from, to)`.
+ *
+ * Derived once per filter pass instead of per event: the old form called
+ * `daysAgo` on every row, allocating three `Date` objects each time, on a screen
+ * whose provider re-renders while surveillance is running. `to` is bounded so an
+ * event stamped in the future belongs to no period.
+ */
+export function periodRange(period: Period, now: number): { from: number; to: number } {
+  const days = periodDays(period);
+  return {
+    from: days == null ? -Infinity : startOfDayBefore(now, days),
+    to: startOfDayBefore(now, -1),
+  };
 }
 
 export function maxDurationMs(max: MaxDuration): number {
@@ -117,16 +148,16 @@ export function clipFileName(kind: DetectionKind, at: number): string {
 }
 
 /**
- * Id for a new event, given the newest one already in the list.
+ * Id for a new event, given the last one minted.
  *
  * Ids were `Date.now()` alone. Clips are filed through an async rename, so two
  * finishing together produced the same id — duplicate `FlatList` keys, and a
  * delete or a retention sweep that removed both rows and unlinked a clip the
- * surviving event still pointed at. Monotonic per list, and still a timestamp
- * in the ordinary case.
+ * surviving event still pointed at. Monotonic, and still a timestamp in the
+ * ordinary case.
  */
-export function nextEventId(latestId: number | undefined, now: number): number {
-  return latestId != null && latestId >= now ? latestId + 1 : now;
+export function nextEventId(latestId: number, now: number): number {
+  return Math.max(now, latestId + 1);
 }
 
 export function totalBytes(events: DetectionEvent[]): number {
@@ -145,10 +176,8 @@ export function expiredEvents(
 ): DetectionEvent[] {
   const days = retentionDays(retention);
   if (days == null) return [];
-  const cutoff = new Date(now);
-  cutoff.setHours(0, 0, 0, 0);
-  const cutoffMs = cutoff.getTime() - (days - 1) * 86_400_000;
-  return events.filter(e => e.timestamp < cutoffMs);
+  const cutoff = startOfDayBefore(now, days - 1);
+  return events.filter(e => e.timestamp < cutoff);
 }
 
 /**

@@ -162,13 +162,14 @@ export function confirmedTracks(tracks: Track[]): Track[] {
 }
 
 /**
- * True when two confirmed-track lists would draw the exact same overlay.
+ * True when two confirmed-track lists would draw the same overlay.
  *
- * `updateTracks` and `confirmedTracks` both return a fresh array every frame, so
- * handing their result straight to `setState` re-rendered the whole provider —
- * and therefore `CameraFeed`, the sheets and the tab bar — at the frame-processor
- * rate, including while nothing at all was in frame. Comparing the drawn fields
- * lets the caller keep the previous array when nothing moved.
+ * Confidence is compared as the whole percent the label actually shows: the raw
+ * float wobbles on every frame for a subject standing still, and treating that
+ * as a change forces a redraw that alters no pixel. Boxes are compared exactly —
+ * they are positioned at full precision. `kind` needs no check: a track's kind
+ * is fixed at creation and `updateTracks` only matches within a kind, so an
+ * equal id already implies an equal kind.
  */
 export function sameVisibleTracks(a: Track[], b: Track[]): boolean {
   if (a === b) return true;
@@ -176,8 +177,9 @@ export function sameVisibleTracks(a: Track[], b: Track[]): boolean {
   for (let i = 0; i < a.length; i++) {
     const x = a[i];
     const y = b[i];
-    if (x.id !== y.id || x.kind !== y.kind || x.confidence !== y.confidence) return false;
     if (
+      x.id !== y.id ||
+      Math.round(x.confidence * 100) !== Math.round(y.confidence * 100) ||
       x.box.x !== y.box.x || x.box.y !== y.box.y ||
       x.box.width !== y.box.width || x.box.height !== y.box.height
     ) return false;
@@ -185,10 +187,17 @@ export function sameVisibleTracks(a: Track[], b: Track[]): boolean {
   return true;
 }
 
-/** The track the UI treats as the subject: highest confidence among confirmed. */
+/**
+ * The track the UI treats as the subject: highest confidence among confirmed.
+ *
+ * Walks the list directly rather than going through `confirmedTracks`, which
+ * allocated a filtered array per call to produce a single element — on a path
+ * the frame processor hits several times a second.
+ */
 export function primaryTrack(tracks: Track[]): Track | null {
   let best: Track | null = null;
-  for (const t of confirmedTracks(tracks)) {
+  for (const t of tracks) {
+    if (!t.confirmed) continue;
     if (!best || t.confidence > best.confidence) best = t;
   }
   return best;
