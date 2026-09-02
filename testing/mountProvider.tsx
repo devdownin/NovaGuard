@@ -7,6 +7,11 @@ export type AppState = ReturnType<typeof useAppState>;
 /**
  * Mounts `AppStateProvider` and hands back a live handle on its value.
  *
+ * Read state through the handle (`handle.state.events`), not a destructured
+ * copy: `state` is reassigned on every render, so destructuring it once pins a
+ * snapshot of the first one. Callbacks on it are stable, so those are safe to
+ * pull out.
+ *
  * Three suites were each carrying their own copy of this, so the
  * hydration-settling contract — one async `act` for the mount, a second for the
  * promises it kicks off — was encoded in three places and drifted between them.
