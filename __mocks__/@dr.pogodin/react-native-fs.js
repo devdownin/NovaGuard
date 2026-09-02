@@ -7,6 +7,7 @@ module.exports = {
   mkdir: jest.fn(async () => {}),
   stat: jest.fn(async () => ({ size: 0 })),
   unlink: jest.fn(async () => {}),
+  moveFile: jest.fn(async () => {}),
   readDir: jest.fn(async () => []),
   getFSInfo: jest.fn(async () => ({
     freeSpace: 0, totalSpace: 0, freeSpaceEx: 0, totalSpaceEx: 0,
