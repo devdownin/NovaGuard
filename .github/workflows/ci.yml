@@ -42,6 +42,19 @@ jobs:
       - name: Tests
         run: npm test -- --ci
 
+      # The jobs above never compile Android resources, and `build-apk` only
+      # runs after a merge — so an invalid resource file reaches `main` through
+      # a green PR and breaks every APK build from then on. That is not
+      # hypothetical: a `--` inside an XML comment in `values/colors.xml` failed
+      # `mergeReleaseResources` on every merge until it was found by hand.
+      # A well-formedness check costs a second and catches that whole class.
+      - name: Validate Android resource XML
+        run: |
+          sudo apt-get install -y --no-install-recommends libxml2-utils \
+            > /dev/null 2>&1 || true
+          find android/app/src/main/res -name '*.xml' -print0 \
+            | xargs -0 --no-run-if-empty xmllint --noout
+
   build-apk:
     name: Build Android APK
     needs: check
