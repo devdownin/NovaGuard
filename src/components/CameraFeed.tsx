@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { RefObject } from 'react';
 import { StyleProp, ViewStyle } from 'react-native';
 import {
-  Camera, runAsync, runAtTargetFps, useCameraDevice, useFrameProcessor,
+  Camera, runAsync, runAtTargetFps, useCameraDevice, useCameraFormat, useFrameProcessor,
 } from 'react-native-vision-camera';
 import { useResizePlugin } from 'vision-camera-resize-plugin';
 import { useFaceDetector } from 'react-native-vision-camera-face-detector';
@@ -12,6 +12,7 @@ import { uprightAspect, uprightRotation } from '../camera/orientation';
 import { uprightBoxToViewBox } from '../camera/framing';
 import { useDetectionModel } from '../camera/useDetectionModel';
 import { interpretDetections } from '../ml/interpretDetections';
+import { qualityBitRate, qualityResolution } from '../recording/library';
 import { DetectionBox, FrameDetection } from '../ml/types';
 
 const MODEL = require('../../assets/models/efficientdet-lite0.tflite');
@@ -28,6 +29,8 @@ interface CameraFeedProps {
   viewHeight: number;
   /** Boxes for the auto-zoom, already normalized to the viewfinder rect. */
   onFrame?: (faces: DetectionBox[], persons: DetectionBox[]) => void;
+  /** Handed up so the recorder can call `startRecording`/`stopRecording` on it. */
+  cameraRef?: RefObject<Camera | null>;
 }
 
 /**
@@ -37,13 +40,22 @@ interface CameraFeedProps {
  * Returns null if there's no permission or no matching device — the caller
  * (Viewfinder) falls back to the decorative standby view in that case.
  */
-export function CameraFeed({ style, active, viewWidth, viewHeight, onFrame }: CameraFeedProps) {
+export function CameraFeed({
+  style, active, viewWidth, viewHeight, onFrame, cameraRef,
+}: CameraFeedProps) {
   const { perms, settings, reportDetections } = useAppState();
 
   const device = useCameraDevice(
     devicePositionFor(settings.camera),
     physicalDeviceFilterFor(settings.camera),
   );
+
+  // The recording quality setting picks the format; without this the camera
+  // would record at whatever default the device chooses and the 720p/1080p/4K
+  // rows would mean nothing.
+  const format = useCameraFormat(device, [
+    { videoResolution: qualityResolution(settings.quality) },
+  ]);
 
   const { resize } = useResizePlugin();
   const { model } = useDetectionModel(MODEL);
@@ -125,12 +137,19 @@ export function CameraFeed({ style, active, viewWidth, viewHeight, onFrame }: Ca
 
   return (
     <Camera
+      ref={cameraRef}
       style={style}
       device={device}
+      format={format}
       isActive={active}
       frameProcessor={active ? frameProcessor : undefined}
       pixelFormat="yuv"
       resizeMode="cover"
+      video={true}
+      // Audio is only captured once the OS microphone permission is actually
+      // granted — asking the camera for audio without it aborts the recording.
+      audio={perms.mic}
+      videoBitRate={qualityBitRate(settings.quality)}
       lowLightBoost={settings.night && device.supportsLowLightBoost}
     />
   );

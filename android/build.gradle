@@ -1,7 +1,10 @@
 buildscript {
     ext {
         buildToolsVersion = "36.0.0"
-        minSdkVersion = 24
+        // Android 16 floor: the app is built, shipped and tested against a
+        // single platform level, so every API used here is unconditionally
+        // available and no legacy-path branching is needed.
+        minSdkVersion = 36
         compileSdkVersion = 36
         targetSdkVersion = 36
         ndkVersion = "27.1.12297006"
