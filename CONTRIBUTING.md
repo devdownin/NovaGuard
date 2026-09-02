@@ -28,9 +28,10 @@ npm run android     # build + lance l'app sur émulateur/appareil Android
 Avant de proposer une pull request, vérifiez que le projet est propre :
 
 ```sh
-npx tsc --noEmit    # types
-npm run lint         # ESLint
-npm test             # Jest
+npm run typecheck   # types (tsc --noEmit)
+npm run lint        # ESLint
+npm test            # Jest (unitaires)
+npm run test:e2e    # Maestro (tests UI E2E sur émulateur/appareil)
 ```
 
 Ces trois vérifications tournent aussi automatiquement en CI (GitHub Actions) sur chaque pull request — voir [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
