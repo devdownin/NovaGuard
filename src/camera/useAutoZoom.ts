@@ -19,8 +19,22 @@ const FOLLOW_MS = 700;
 const FACE_TRIGGER_STREAK = 2;
 /** How long everything must stay empty before we pull back to the full frame. */
 const LOST_GRACE_MS = 1800;
-/** Keeps a second face from yanking the camera straight back into a close-up. */
-const RETRIGGER_COOLDOWN_MS = 6000;
+/** How long the wide shot is left alone once it lands, so it can be read. */
+export const BODY_DWELL_MS = 2500;
+
+/** Face zoom in, hold, pull back out — the whole move, end to end. */
+export const FULL_CYCLE_MS = FACE_ZOOM_IN_MS + FACE_HOLD_MS + BODY_ZOOM_OUT_MS;
+
+/**
+ * Keeps a second face from yanking the camera straight back into a close-up.
+ *
+ * Derived rather than picked: a literal shorter than {@link FULL_CYCLE_MS} lets
+ * a new close-up interrupt the pull-back before it has finished, so the wide
+ * shot of the whole person — the entire point of the move — is never reached.
+ * That is exactly what a hardcoded 6000 did here: it cut the 1600 ms pull-back
+ * at roughly 600 ms and then looped, forever, while anyone stood in frame.
+ */
+export const RETRIGGER_COOLDOWN_MS = FULL_CYCLE_MS + BODY_DWELL_MS;
 
 const TARGET_SMOOTHING = 0.35;
 const FACE_COVERAGE = 0.45;

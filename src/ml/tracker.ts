@@ -8,7 +8,7 @@ import { DetectionBox, FrameDetection } from './types';
  * recording session (and writes a history event), while a person briefly
  * occluded splits one passage into two events. Tracks fix both ends: a subject
  * has to be seen `confirmAfter` frames running before it counts, and survives
- * `dropAfter` empty frames before it is let go.
+ * `dropAfterMs` of not being seen before it is let go.
  */
 
 export interface Track {
@@ -28,16 +28,28 @@ export interface Track {
 export interface TrackerOptions {
   /** Minimum overlap for a detection to continue an existing track. */
   iouThreshold: number;
-  /** Consecutive hits before a track is trusted. */
+  /**
+   * Consecutive hits before a track is trusted. Counted in frames on purpose:
+   * this guards against a single spurious detection, and "corroborated by the
+   * next look" is a claim about looks, not about elapsed time.
+   */
   confirmAfter: number;
-  /** Consecutive misses before a track is dropped. */
-  dropAfter: number;
+  /**
+   * How long a track may go unseen before it is dropped, in milliseconds.
+   *
+   * Time, not frames. This one is a claim about the world — someone stepping
+   * behind a pillar is hidden for about a second whatever rate we analyse at —
+   * and counting frames made it mean 3 s at "Basse" (1 fps) and 0.6 s at
+   * "Haute" (5 fps), so the sensitivity setting silently rescaled how tolerant
+   * the tracker was of occlusion.
+   */
+  dropAfterMs: number;
 }
 
 export const DEFAULT_TRACKER_OPTIONS: TrackerOptions = {
   iouThreshold: 0.25,
   confirmAfter: 2,
-  dropAfter: 3,
+  dropAfterMs: 1200,
 };
 
 export function iou(a: DetectionBox, b: DetectionBox): number {
@@ -97,8 +109,9 @@ export function updateTracks(
   tracks.forEach((track, t) => {
     const d = matches.get(t);
     if (d === undefined) {
-      const misses = track.misses + 1;
-      if (misses < options.dropAfter) next.push({ ...track, misses });
+      if (now - track.lastSeen < options.dropAfterMs) {
+        next.push({ ...track, misses: track.misses + 1 });
+      }
       return;
     }
     const detection = detections[d];
@@ -134,8 +147,18 @@ export function updateTracks(
   return next;
 }
 
+/**
+ * The subjects the app should act on: everything confirmed and not yet dropped.
+ *
+ * Deliberately does *not* exclude tracks with a miss on the current frame. It
+ * used to, which quietly cancelled the tracker's own occlusion tolerance for
+ * everything downstream: one missed detection made the overlay box vanish and
+ * `primaryTrack` return null, so the box flickered and the recording's
+ * post-roll timer started against a subject that was still there. A track is
+ * live until `updateTracks` lets it go — that is what `dropAfterMs` is for.
+ */
 export function confirmedTracks(tracks: Track[]): Track[] {
-  return tracks.filter(t => t.confirmed && t.misses === 0);
+  return tracks.filter(t => t.confirmed);
 }
 
 /** The track the UI treats as the subject: highest confidence among confirmed. */

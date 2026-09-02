@@ -27,6 +27,12 @@ export interface InterpretOptions {
  *
  * Runs on the camera's frame-processor thread — must stay a worklet.
  */
+/** Worklet-safe: a local helper, not a closure over anything outside. */
+function clamp01(value: number): number {
+  'worklet';
+  return value < 0 ? 0 : value > 1 ? 1 : value;
+}
+
 export function interpretDetections(outputs: Float32Array[], options: InterpretOptions): FrameDetection[] {
   'worklet';
 
@@ -49,19 +55,25 @@ export function interpretDetections(outputs: Float32Array[], options: InterpretO
     if (kind == null) continue;
 
     const o = i * 4;
-    const yMin = locations[o];
-    const xMin = locations[o + 1];
-    const yMax = locations[o + 2];
-    const xMax = locations[o + 3];
+    // Clamp the corners, then derive the size from them. Clamping the origin
+    // and the size independently — which this did — inflates any box the model
+    // pushes past the frame edge, and edges are where surveillance subjects
+    // live. A person entering at xMin -0.08, xMax 0.25 came out 0.33 wide
+    // instead of 0.25, and one leaving at xMax 1.14 produced a box reaching 14%
+    // of the frame beyond its own right edge.
+    const yMin = clamp01(locations[o]);
+    const xMin = clamp01(locations[o + 1]);
+    const yMax = clamp01(locations[o + 2]);
+    const xMax = clamp01(locations[o + 3]);
 
     results.push({
       kind,
       confidence,
       box: {
-        x: Math.max(0, Math.min(1, xMin)),
-        y: Math.max(0, Math.min(1, yMin)),
-        width: Math.max(0, Math.min(1, xMax - xMin)),
-        height: Math.max(0, Math.min(1, yMax - yMin)),
+        x: xMin,
+        y: yMin,
+        width: Math.max(0, xMax - xMin),
+        height: Math.max(0, yMax - yMin),
       },
     });
   }

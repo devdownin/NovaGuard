@@ -22,6 +22,15 @@ const SENS_OPTIONS: { label: string; value: Sensitivity }[] = [
 
 const RETENTION_OPTIONS: Retention[] = ['1 jour', '7 jours', '30 jours', '90 jours', 'Toujours'];
 
+// The sensitivity setting is really an analysis rate: it decides how often the
+// scene is looked at, so it decides how fast a subject is confirmed. Saying so
+// beats leaving three words the user has to guess at.
+const SENS_HINT: Record<Sensitivity, string> = {
+  Basse: '1 image analysée par seconde — économe, mais un passage rapide peut échapper',
+  Moyenne: '3 images par seconde',
+  Haute: '5 images par seconde — détection la plus réactive, batterie la plus sollicitée',
+};
+
 export function SetupScreen() {
   const s = useAppState();
   const { settings, events, storage: store } = s;
@@ -72,6 +81,9 @@ export function SetupScreen() {
               paddingVertical={7}
               segmentRadius={7}
             />
+            <Text style={styles.hint}>
+              {SENS_HINT[settings.sens]}
+            </Text>
           </View>
           <View style={[styles.subBlock, { paddingTop: 14, paddingBottom: 2 }]}>
             <View style={styles.thresholdRow}>
@@ -98,7 +110,12 @@ export function SetupScreen() {
           <SettingRow label="Durée maximale">
             <ValueButton label={settings.max} onPress={s.cycleMax} />
           </SettingRow>
-          <SettingRow label="Qualité vidéo">
+          <SettingRow
+            label="Qualité vidéo"
+            subtitle={settings.quality === '4K'
+              ? 'Le 4K quadruple aussi le coût de l’analyse des images'
+              : undefined}
+          >
             <ValueButton label={settings.quality} onPress={s.cycleQuality} />
           </SettingRow>
         </CollapsibleSection>

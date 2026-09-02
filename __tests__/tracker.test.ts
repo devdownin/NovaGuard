@@ -43,10 +43,13 @@ describe('updateTracks', () => {
     let tracks = updateTracks([], [person(0.3)], 1000);
     expect(confirmedTracks(tracks)).toHaveLength(0);
 
-    // The blip vanishes instead of repeating.
+    // The blip vanishes instead of repeating. It is never confirmed, and once
+    // the occlusion tolerance has elapsed in real time the track is let go.
     tracks = updateTracks(tracks, [], 1100);
     tracks = updateTracks(tracks, [], 1200);
-    tracks = updateTracks(tracks, [], 1300);
+    expect(confirmedTracks(tracks)).toHaveLength(0);
+
+    tracks = updateTracks(tracks, [], 1000 + DEFAULT_TRACKER_OPTIONS.dropAfterMs);
     expect(tracks).toHaveLength(0);
   });
 
@@ -82,10 +85,47 @@ describe('updateTracks', () => {
 
   it('drops a track once it has been missing long enough', () => {
     let tracks = updateTracks([], [person(0.3)], 1000);
-    for (let i = 0; i < DEFAULT_TRACKER_OPTIONS.dropAfter; i++) {
-      tracks = updateTracks(tracks, [], 1100 + i * 100);
-    }
+    tracks = updateTracks(tracks, [], 1000 + DEFAULT_TRACKER_OPTIONS.dropAfterMs - 1);
+    expect(tracks).toHaveLength(1);
+    tracks = updateTracks(tracks, [], 1000 + DEFAULT_TRACKER_OPTIONS.dropAfterMs);
     expect(tracks).toHaveLength(0);
+  });
+
+  it('tolerates occlusion for the same wall-clock time at any analysis rate', () => {
+    // The tolerance used to be counted in frames, so "Basse" (1 fps) forgave a
+    // 3 s gap while "Haute" (5 fps) gave up after 0.6 s — the sensitivity
+    // setting silently rescaled it.
+    const survivesAt = (interval: number) => {
+      let tracks = updateTracks([], [person(0.3)], 0);
+      tracks = updateTracks(tracks, [person(0.3)], interval);
+      let t = interval;
+      // Look again after a gap of just under the tolerance, at this rate.
+      while (t < DEFAULT_TRACKER_OPTIONS.dropAfterMs - interval) {
+        t += interval;
+        tracks = updateTracks(tracks, [], t);
+      }
+      return tracks.length;
+    };
+    expect(survivesAt(1000)).toBe(1);   // Basse
+    expect(survivesAt(333)).toBe(1);    // Moyenne
+    expect(survivesAt(200)).toBe(1);    // Haute
+  });
+
+  it('keeps a confirmed subject on screen through a missed frame', () => {
+    // The overlay reads confirmedTracks; requiring misses === 0 made the box
+    // blink out on any single miss and started the recording's post-roll
+    // against a subject the tracker had not given up on.
+    let tracks = updateTracks([], [person(0.3)], 1000);
+    tracks = updateTracks(tracks, [person(0.3)], 1100);
+    expect(confirmedTracks(tracks)).toHaveLength(1);
+
+    tracks = updateTracks(tracks, [], 1200);
+    expect(tracks[0].misses).toBe(1);
+    expect(confirmedTracks(tracks)).toHaveLength(1);
+    expect(primaryTrack(tracks)).not.toBeNull();
+
+    tracks = updateTracks(tracks, [person(0.31)], 1300);
+    expect(confirmedTracks(tracks)).toHaveLength(1);
   });
 
   it('tracks several subjects at once', () => {
@@ -126,10 +166,17 @@ describe('primaryTrack', () => {
     expect(primaryTrack(tracks)!.confidence).toBeCloseTo(0.95);
   });
 
-  it('ignores a confirmed track that is currently missing', () => {
+  it('holds on to a confirmed track through a miss, and lets go once dropped', () => {
+    // This used to assert the opposite. Going null on the first miss is what
+    // made the overlay blink and started the post-roll early; the track is only
+    // gone once updateTracks has actually dropped it.
     let tracks: Track[] = updateTracks([], [person(0.3)], 1000);
     tracks = updateTracks(tracks, [person(0.3)], 1100);
     tracks = updateTracks(tracks, [], 1200);
+    expect(primaryTrack(tracks)).not.toBeNull();
+
+    tracks = updateTracks(tracks, [], 1100 + DEFAULT_TRACKER_OPTIONS.dropAfterMs);
+    expect(tracks).toHaveLength(0);
     expect(primaryTrack(tracks)).toBeNull();
   });
 });
