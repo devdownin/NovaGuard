@@ -21,7 +21,7 @@ Caméra de surveillance intelligente, locale et open source. NovaGuard transform
 
 ## Stack technique
 
-- [React Native](https://reactnative.dev) (CLI *bare*, sans Expo) — Android
+- [React Native](https://reactnative.dev) (CLI *bare*, sans Expo) — Android 16 (API 36) minimum ; `minSdk`, `compileSdk` et `targetSdk` sont tous à 36, donc un seul niveau de plateforme à supporter
 - TypeScript
 - [react-native-vision-camera](https://github.com/mrousavy/react-native-vision-camera) pour le flux caméra et les frame processors
 - [react-native-fast-tflite](https://github.com/mrousavy/react-native-fast-tflite) pour l'inférence TensorFlow Lite embarquée (modèle `assets/models/efficientdet-lite0.tflite`, quantifié uint8 320×320, licence Apache-2.0), avec délégué GPU et repli CPU automatique

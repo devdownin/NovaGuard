@@ -5,7 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { StatusBar, StyleSheet, View } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { initialWindowMetrics, SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { color } from './src/theme';
 import { AppStateProvider, useAppState } from './src/state/AppStateContext';
 import { SurveillanceScreen } from './src/screens/SurveillanceScreen';
@@ -69,8 +69,15 @@ function AppShell() {
 
 function App() {
   return (
-    <SafeAreaProvider>
-      <StatusBar barStyle="light-content" backgroundColor={color.bg} />
+    // `initialMetrics` lets the first paint use insets the native side already
+    // knows, instead of withholding the whole tree until an onLayout round-trip
+    // reports them — one less blank frame between the launch screen and the app.
+    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+      {/* No `backgroundColor`: under the edge-to-edge display this SDK level
+          enforces, the system bars are always transparent and React Native
+          ignores the prop. The strip behind the status bar is painted by the
+          SafeAreaView below instead. */}
+      <StatusBar barStyle="light-content" translucent />
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <AppStateProvider>
           <AppShell />

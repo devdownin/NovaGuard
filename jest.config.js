@@ -1,5 +1,9 @@
 module.exports = {
   preset: 'react-native',
+  // NovaGuard is Android-only. Without this the preset resolves `.ios.js`
+  // files and reports Platform.OS as 'ios', so platform branches (the TFLite
+  // GPU delegate choice, for one) would be tested on the wrong path.
+  haste: { defaultPlatform: 'android', platforms: ['android', 'native'] },
   setupFiles: [
     '@react-native-async-storage/async-storage/jest',
   ],

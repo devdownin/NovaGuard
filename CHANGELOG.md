@@ -12,7 +12,8 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et ce p
 - Permission micro réelle (`useMicrophonePermission` + `RECORD_AUDIO`) : l'audio n'est capté qu'une fois accordée.
 - Purge automatique par rétention, et récupération d'espace en supprimant les clips les plus anciens quand le volume passe sous 500 Mo libres.
 - Nettoyage au démarrage des clips orphelins — fichiers restés sur disque après un arrêt brutal, qu'aucun évènement ne référence.
-- Tests unitaires de la gestion des enregistrements (`__tests__/library.test.ts`) — 65 tests au total.
+- Tests unitaires de la gestion des enregistrements (`__tests__/library.test.ts`).
+- Tests de démarrage et de chargement du modèle (`__tests__/startup.test.tsx`) : passage de l'écran de démarrage, hydratation depuis `AsyncStorage`, arrivée sur l'écran Surveillance, repli quand la caméra n'est pas autorisée, absence de données de démonstration, ignorance des anciennes clés `v1` — et, côté modèle, résolution de l'asset par Metro, choix du délégué GPU en premier, repli CPU, et échec signalé seulement quand les deux ont refusé. **77 tests au total.**
 - Flux caméra réel (`react-native-vision-camera`) à la place du placeholder de l'écran Surveillance.
 - Détection de personnes/animaux sur l'appareil via un modèle TensorFlow Lite embarqué (COCO), avec `react-native-fast-tflite` et `vision-camera-resize-plugin` dans un frame processor dédié.
 - Permission caméra réelle (demandée depuis l'onboarding et Setup → Confidentialité, au lieu d'être simulée).
@@ -24,6 +25,10 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et ce p
 - Tests unitaires de la géométrie de cadrage (`__tests__/framing.test.ts`), du redressement et du mapping « cover » (`__tests__/orientation.test.ts`) et du suivi des sujets (`__tests__/tracker.test.ts`).
 
 ### Modifié
+- **Plancher relevé à Android 16 (API 36)** : `minSdkVersion` passe de 24 à 36, au niveau de `compileSdk` et `targetSdk`. L'application est donc construite, livrée et testée contre un seul niveau de plateforme.
+- **Edge-to-edge activé** (`edgeToEdgeEnabled=true`) : ce n'est pas un choix à ce niveau d'API. Android 15 impose l'affichage bord à bord aux applications ciblant l'API 35+, et Android 16 ignore complètement l'échappatoire `windowOptOutEdgeToEdgeEnforcement`. Le système dessine derrière les barres de toute façon ; laisser le drapeau à `false` empêchait seulement React Native d'accorder sa barre d'état et ses encarts à ce comportement. La prop `backgroundColor` de `StatusBar`, ignorée dans ce mode, a été retirée.
+- `SafeAreaProvider` reçoit `initialMetrics` : le premier rendu utilise les encarts déjà connus côté natif au lieu d'attendre un aller-retour `onLayout`, ce qui retire une image blanche entre l'écran de lancement et l'application.
+- Jest s'exécute désormais en plateforme `android` : sans cela le préréglage résolvait les fichiers `.ios.js` et rapportait `Platform.OS === 'ios'`, donc les branches spécifiques à Android — dont le choix du délégué GPU pour TFLite — étaient testées sur le mauvais chemin.
 - **Les réglages d'enregistrement et de stockage font enfin quelque chose.** Ils n'étaient lus que pour afficher leur propre libellé :
   - « Durée après détection » prolonge réellement le clip après le départ du sujet ;
   - « Durée maximale » coupe le clip et enchaîne sur un nouveau segment si le sujet est toujours là ;

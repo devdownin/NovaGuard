@@ -411,12 +411,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const info = await storageInfo(totalBytes(events));
+      const disk = await storageInfo(totalBytes(events));
       if (cancelled) return;
-      setStore(info);
+      setStore(disk);
 
-      if (!settings.autoDel || info.free <= 0) return;
-      const needed = bytesToReclaim(info.free);
+      if (!settings.autoDel || disk.free <= 0) return;
+      const needed = bytesToReclaim(disk.free);
       if (needed <= 0) return;
 
       const victims = eventsToReclaim(events, needed);
