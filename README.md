@@ -13,12 +13,13 @@ Caméra de surveillance intelligente, locale et open source. NovaGuard transform
 - **Enregistrement** — chaque détection confirmée écrit un clip MP4 (H.264) dans le stockage privé de l'application : aucune permission de stockage, rien dans la galerie partagée, tout disparaît à la désinstallation. La qualité (720p/1080p/4K), la durée après détection et la durée maximale d'un clip sont réglables ; au-delà du maximum le clip est coupé et la suite enregistrée dans un segment suivant.
 - **Surveillance en arrière-plan** — un service de premier plan de type `camera` (plus `microphone` quand la permission est accordée) démarre avec la surveillance : Android autorise alors la caméra hors écran et ne ferme pas le processus. Une notification permanente et silencieuse indique que la caméra est active ; elle est masquée sur l'écran verrouillé.
 - **Gestion du stockage** — rétention configurable (1 à 90 jours, ou toujours), suppression automatique des clips les plus anciens quand le volume passe sous 500 Mo libres, espace réellement mesuré sur l'appareil, et nettoyage au démarrage des fichiers qu'aucun évènement ne référence plus.
+- **Alertes** — notification à l'ouverture d'une détection, avec un délai minimum d'une minute entre deux. Elle réveille sur l'écran verrouillé sans y afficher ce qui a été vu. Le son et la vibration se règlent dans les paramètres Android du canal, où Android les a placés depuis la version 8.
 - **Historique** — événements enregistrés sous forme de cartes, filtrables par type et par période, avec détail complet (lecture de la vidéo, confiance, taille réelle, suppression) en panneau.
 - **Setup** — réglages de surveillance, détection, enregistrement, stockage et notifications regroupés par sections repliables ; la sensibilité et le seuil de confiance pilotent directement le pipeline de détection.
 - **Confidentialité par conception** — traitement 100 % local, détection et enregistrement compris. Les clips restent dans le stockage privé de l'application, les réglages et l'historique dans `AsyncStorage`, et l'APK de release ne déclare même pas la permission `INTERNET`.
 - **Premier lancement** — écran de démarrage animé (viseur, marque, trois piliers du produit) pendant l'hydratation de l'état persisté, avant l'onboarding.
 
-> Détection **et** enregistrement tournent réellement sur l'appareil. Rien n'a toutefois pu être exécuté sur un vrai capteur dans cet environnement de build (ni SDK Android ni émulateur) : la géométrie et la gestion du stockage sont couvertes par des tests unitaires, mais la capture, l'orientation et l'alignement des cadres restent à valider en conditions réelles. La surveillance suppose l'application au premier plan — voir [Feuille de route](#feuille-de-route).
+> Plus aucun réglage de l'interface n'est décoratif : tout ce qui est affiché agit réellement, ou a été retiré. Rien n'a toutefois pu être exécuté sur un vrai capteur dans cet environnement de build (ni SDK Android ni émulateur) : la géométrie, la gestion du stockage et les règles d'alerte sont couvertes par des tests unitaires, mais la capture, l'orientation, l'alignement des cadres et tout le code natif restent à valider en conditions réelles — voir [Feuille de route](#feuille-de-route). Le workflow CI produit un APK installable pour ça.
 
 ## Stack technique
 
@@ -59,7 +60,7 @@ src/
   state/        état applicatif (contexte React), types, valeurs par défaut, persistance
   camera/       sélection du device caméra, géométrie de cadrage et machine à états du zoom auto
   recording/    capture des clips, rétention, récupération d'espace et accès disque
-  surveillance/ pilotage du service de premier plan et permission de notification
+  surveillance/ service de premier plan, permission de notification, règles d'alerte
   specs/        specs TurboModule (codegen) des modules natifs de l'application
   ml/           décodage des sorties du modèle TFLite, labels COCO, suivi des sujets (IoU)
   constants/    métadonnées de l'application (version, licence, dépôt)
@@ -79,9 +80,8 @@ assets/store/   icône source et icône 512×512 pour les fiches store
 - [ ] Vérifier sur un vrai appareil le sens de redressement des images (`src/camera/orientation.ts`), l'alignement des cadres et toute la chaîne d'enregistrement — la géométrie et la gestion du stockage sont couvertes par des tests unitaires, mais ni la convention d'orientation du capteur ni la capture elle-même ne le sont
 - [x] Service de premier plan, pour que la caméra reste autorisée hors écran
 - [ ] Confirmer sur appareil que la capture survit à l'écran éteint (le service rend l'accès caméra autorisé ; le sort de la surface d'aperçu reste à vérifier)
-- [ ] Démarrage automatique de la surveillance au boot (`BOOT_COMPLETED`)
 - [ ] Partage d'un enregistrement (nécessite un `FileProvider` Android)
-- [ ] Notifications à chaque détection
+- [x] Notifications à chaque détection
 
 ## Contribuer
 

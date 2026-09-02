@@ -10,6 +10,22 @@ export interface Spec extends TurboModule {
   start(title: string, body: string): void;
   stop(): void;
   isRunning(): boolean;
+
+  /**
+   * Posts (or replaces) the detection alert. One reusable notification rather
+   * than a stack: the app's own Historique screen is the record, so a pile of
+   * system notifications would only be noise.
+   */
+  notifyDetection(title: string, body: string): void;
+  dismissDetection(): void;
+
+  /**
+   * Opens Android's own settings page for the detection channel. Since Android
+   * 8 the platform — not the app — owns whether a channel makes sound or
+   * vibrates, so this is the only honest place to send someone who wants to
+   * change that.
+   */
+  openDetectionChannelSettings(): void;
 }
 
 // `get` rather than `getEnforcing`: this returns null under Jest, where there

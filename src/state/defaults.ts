@@ -2,7 +2,7 @@ import { DetectionEvent, Settings } from './types';
 
 export const defaultSettings: Settings = {
   camera: 'Arrière (1×)',
-  boot: true,
+  resumeOnLaunch: true,
   night: true,
   person: true,
   animal: true,
@@ -16,8 +16,6 @@ export const defaultSettings: Settings = {
   autoDel: true,
   notif: true,
   notifDet: true,
-  sound: false,
-  vibe: true,
   exp: { surv: true, det: false, rec: false, sto: false, not: false, about: false },
 };
 

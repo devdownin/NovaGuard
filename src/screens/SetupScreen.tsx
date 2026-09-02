@@ -41,8 +41,11 @@ export function SetupScreen() {
           <SettingRow label="Caméra utilisée">
             <ValueButton label={settings.camera} onPress={s.cycleCamera} />
           </SettingRow>
-          <SettingRow label="Surveillance au démarrage">
-            <Switch value={settings.boot} onValueChange={s.toggleBoot} />
+          <SettingRow
+            label="Reprendre à l'ouverture"
+            subtitle="Android interdit à la caméra de démarrer seule après un redémarrage"
+          >
+            <Switch value={settings.resumeOnLaunch} onValueChange={s.toggleResumeOnLaunch} />
           </SettingRow>
           <SettingRow label="Mode nuit" subtitle="Disponible sur cet appareil">
             <Switch value={settings.night} onValueChange={s.toggleNight} />
@@ -153,12 +156,15 @@ export function SetupScreen() {
           <SettingRow label="À chaque détection">
             <Switch value={settings.notifDet} onValueChange={s.toggleNotifDet} />
           </SettingRow>
-          <SettingRow label="Son">
-            <Switch value={settings.sound} onValueChange={s.toggleSound} />
-          </SettingRow>
-          <SettingRow label="Vibration">
-            <Switch value={settings.vibe} onValueChange={s.toggleVibe} />
-          </SettingRow>
+          <SecondaryOutlineButton
+            label="Son et vibration (Android)"
+            onPress={s.openAlertSoundSettings}
+            style={{ marginTop: 10 }}
+          />
+          <Text style={styles.hint}>
+            Depuis Android 8, le son et la vibration d'une notification appartiennent au
+            système, pas à l'application.
+          </Text>
         </CollapsibleSection>
 
         <CollapsibleSection title="À PROPOS" expanded={settings.exp.about} onToggle={() => s.toggleSection('about')}>
@@ -267,6 +273,13 @@ const styles = StyleSheet.create({
     color: color.text,
     fontVariant: ['tabular-nums'],
     marginTop: 2,
+  },
+  hint: {
+    fontFamily: font.regular,
+    fontSize: 11,
+    lineHeight: 15,
+    color: color.neutral600,
+    marginTop: 8,
   },
   retentionWrap: {
     flexDirection: 'row',
