@@ -2,7 +2,7 @@ import React, {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
 } from 'react';
 import type { Camera as VisionCamera } from 'react-native-vision-camera';
-import { useCameraPermission, useMicrophonePermission } from 'react-native-vision-camera';
+import { Camera as CameraModule, useCameraPermission, useMicrophonePermission } from 'react-native-vision-camera';
 import {
   Camera, DetectionEvent, DetectionKind, ExpandedSections, HistoryFilter, InfoPanel,
   MaxDuration, OnboardingStep, Period, Permissions, PostRoll, Quality,
@@ -22,9 +22,11 @@ import {
 } from '../recording/library';
 import { deleteFiles, orphanedRecordings, storageInfo } from '../recording/videoStore';
 import {
-  hasNotificationPermission, requestNotificationPermission, startForegroundService,
+  dismissDetectionAlert, hasNotificationPermission, notifyDetection,
+  openDetectionChannelSettings, requestNotificationPermission, startForegroundService,
   stopForegroundService,
 } from '../surveillance/foregroundService';
+import { alertContent, shouldAlert } from '../surveillance/alerts';
 
 interface AppStateValue {
   hydrated: boolean;
@@ -84,7 +86,7 @@ interface AppStateValue {
   settings: Settings;
   toggleSection: (key: keyof ExpandedSections) => void;
   cycleCamera: () => void;
-  toggleBoot: () => void;
+  toggleResumeOnLaunch: () => void;
   toggleNight: () => void;
   togglePerson: () => void;
   toggleAnimal: () => void;
@@ -98,8 +100,8 @@ interface AppStateValue {
   toggleAutoDel: () => void;
   toggleNotif: () => void;
   toggleNotifDet: () => void;
-  toggleSound: () => void;
-  toggleVibe: () => void;
+  /** Sound and vibration live in Android's channel settings, not here. */
+  openAlertSoundSettings: () => void;
   wipeAllVideos: () => void;
 
   // info panel (permissions / stored data)
@@ -188,19 +190,35 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [s, ev, dt, ld, onboarded] = await Promise.all([
+      const [s, ev, dt, ld, wasMonitoring, onboarded] = await Promise.all([
         storage.loadSettings(),
         storage.loadEvents(),
         storage.loadDetToday(),
         storage.loadLastDet(),
+        storage.loadMonitoring(),
         storage.loadOnboardingComplete(),
       ]);
       if (cancelled) return;
-      if (s) setSettings(s);
+      // Merged over the defaults rather than used as-is: a settings object
+      // written by an older version is missing every field added since, and
+      // spreading it whole would leave those undefined.
+      const restored = s ? { ...defaultSettings, ...s } : defaultSettings;
+      setSettings(restored);
       if (ev) setEvents(ev);
       setDetToday(todayCount(dt, Date.now()));
       if (ld) setLastDet(ld);
       setOnb(onboarded ? null : 'intro');
+
+      // Surveillance picks up where it left off. Gated on the camera permission
+      // because a foreground service of type camera cannot be started without
+      // it, and on onboarding being done so a first launch is never hijacked.
+      // Read imperatively rather than through the hook's value: this effect
+      // must run exactly once, and depending on the hook would re-run the whole
+      // hydration every time the permission changed.
+      const camGranted = CameraModule.getCameraPermissionStatus() === 'granted';
+      if (onboarded && restored.resumeOnLaunch && wasMonitoring && camGranted) {
+        setMonitoring(true);
+      }
       setHydrated(true);
 
       // Clips left behind by a crash between the encoder closing a file and the
@@ -219,6 +237,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     if (hydrated) storage.saveDetToday({ count: detToday, day: Date.now() });
   }, [hydrated, detToday]);
   useEffect(() => { if (hydrated) storage.saveLastDet(lastDet); }, [hydrated, lastDet]);
+  useEffect(() => { if (hydrated) storage.saveMonitoring(monitoring); }, [hydrated, monitoring]);
 
   // ── live clock, independent of monitoring ───────────────────────────
   const dayRef = useRef(Date.now());
@@ -249,6 +268,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const pendingRef = useRef<{ kind: DetectionKind; dur: number; conf: number } | null>(null);
   /** Post-roll: keep rolling for a moment after the last subject leaves. */
   const postRollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** When the last detection alert went out, for the cooldown. */
+  const lastAlertRef = useRef<number | null>(null);
 
   const commitEvent = useCallback((
     kind: DetectionKind, dur: number, c: number, clip: Clip | null,
@@ -320,6 +341,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const freeSpaceRef = useRef(0);
   useEffect(() => { freeSpaceRef.current = store.free; }, [store.free]);
 
+  // Likewise for the alert switches: toggling one must not rebuild the worklet.
+  const alertSettingsRef = useRef({ notif: settings.notif, notifDet: settings.notifDet });
+  useEffect(() => {
+    alertSettingsRef.current = { notif: settings.notif, notifDet: settings.notifDet };
+  }, [settings.notif, settings.notifDet]);
+
   const cancelPostRoll = useCallback(() => {
     if (postRollRef.current) {
       clearTimeout(postRollRef.current);
@@ -369,6 +396,16 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           setRecError(null);
           startRecording();
         }
+
+        // Alert on the *opening* of a session, not on the event written when it
+        // closes: the point of a surveillance alert is that someone is there
+        // now, not that someone was there for the last thirty seconds.
+        const now = Date.now();
+        if (shouldAlert(alertSettingsRef.current, lastAlertRef.current, now)) {
+          lastAlertRef.current = now;
+          const { title, body } = alertContent(primary.kind, now);
+          notifyDetection(title, body);
+        }
       } else {
         sessionMaxConfRef.current = Math.max(sessionMaxConfRef.current, primary.maxConfidence);
         setRecSec(Math.floor((Date.now() - sessionStartRef.current) / 1000));
@@ -406,8 +443,15 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   // The foreground service is what lets the camera keep running once the app
   // leaves the screen; without it Android cuts capture and may kill the process.
   useEffect(() => {
-    if (monitoring) startForegroundService();
-    else stopForegroundService();
+    if (monitoring) {
+      startForegroundService();
+      return;
+    }
+    stopForegroundService();
+    // A "person detected" alert left standing after surveillance is off says
+    // something that is no longer true.
+    dismissDetectionAlert();
+    lastAlertRef.current = null;
   }, [monitoring]);
 
   // Leaving a "surveillance active" notification behind after the process is
@@ -487,7 +531,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const cycleMax = useCallback(() => patchSettings({ max: cycle(MAX_OPTIONS, settings.max) }), [patchSettings, settings.max]);
   const cycleQuality = useCallback(() => patchSettings({ quality: cycle(QUALITY_OPTIONS, settings.quality) }), [patchSettings, settings.quality]);
 
-  const toggleBoot = useCallback(() => patchSettings({ boot: !settings.boot }), [patchSettings, settings.boot]);
+  const toggleResumeOnLaunch = useCallback(
+    () => patchSettings({ resumeOnLaunch: !settings.resumeOnLaunch }),
+    [patchSettings, settings.resumeOnLaunch],
+  );
   const toggleNight = useCallback(() => patchSettings({ night: !settings.night }), [patchSettings, settings.night]);
   const togglePerson = useCallback(() => patchSettings({ person: !settings.person }), [patchSettings, settings.person]);
   const toggleAnimal = useCallback(() => patchSettings({ animal: !settings.animal }), [patchSettings, settings.animal]);
@@ -495,8 +542,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const toggleAutoDel = useCallback(() => patchSettings({ autoDel: !settings.autoDel }), [patchSettings, settings.autoDel]);
   const toggleNotif = useCallback(() => patchSettings({ notif: !settings.notif }), [patchSettings, settings.notif]);
   const toggleNotifDet = useCallback(() => patchSettings({ notifDet: !settings.notifDet }), [patchSettings, settings.notifDet]);
-  const toggleSound = useCallback(() => patchSettings({ sound: !settings.sound }), [patchSettings, settings.sound]);
-  const toggleVibe = useCallback(() => patchSettings({ vibe: !settings.vibe }), [patchSettings, settings.vibe]);
+  const openAlertSoundSettings = useCallback(() => openDetectionChannelSettings(), []);
 
   const setSensitivity = useCallback((s: Sensitivity) => patchSettings({ sens: s }), [patchSettings]);
   const setThreshold = useCallback((v: number) => patchSettings({ threshold: v }), [patchSettings]);
@@ -533,9 +579,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     events, filter, setFilter, period, setPeriod, periodOpen, togglePeriodOpen, selected, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete,
     confirmWipe, askWipe, cancelWipe, doWipe,
-    settings, toggleSection, cycleCamera, toggleBoot, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom,
+    settings, toggleSection, cycleCamera, toggleResumeOnLaunch, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom,
     setSensitivity, setThreshold, cyclePost, cycleMax, cycleQuality, setRetention,
-    toggleAutoDel, toggleNotif, toggleNotifDet, toggleSound, toggleVibe, wipeAllVideos,
+    toggleAutoDel, toggleNotif, toggleNotifDet, openAlertSoundSettings, wipeAllVideos,
     info, openInfo, closeInfo,
     onb, perms, onbNext, onbFinish, grantPermission,
   }), [
@@ -543,9 +589,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     isRecording, recError, store, toggleMonitoring, reportDetections,
     events, filter, period, periodOpen, togglePeriodOpen, selected, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete, confirmWipe, askWipe, cancelWipe, doWipe,
-    settings, toggleSection, cycleCamera, toggleBoot, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom,
+    settings, toggleSection, cycleCamera, toggleResumeOnLaunch, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom,
     setSensitivity, setThreshold, cyclePost, cycleMax, cycleQuality, setRetention,
-    toggleAutoDel, toggleNotif, toggleNotifDet, toggleSound, toggleVibe, wipeAllVideos,
+    toggleAutoDel, toggleNotif, toggleNotifDet, openAlertSoundSettings, wipeAllVideos,
     info, openInfo, closeInfo, onb, perms, onbNext, onbFinish, grantPermission,
   ]);
 

@@ -14,6 +14,7 @@ const KEYS = {
   events: '@novaguard:events:v2',
   detToday: '@novaguard:detToday:v2',
   lastDet: '@novaguard:lastDet',
+  monitoring: '@novaguard:monitoring',
   onboardingComplete: '@novaguard:onboardingComplete',
 } as const;
 
@@ -60,6 +61,9 @@ export const storage = {
 
   loadLastDet: () => readJson<string>(KEYS.lastDet),
   saveLastDet: (v: string) => writeJson(KEYS.lastDet, v),
+
+  loadMonitoring: () => readJson<boolean>(KEYS.monitoring),
+  saveMonitoring: (v: boolean) => writeJson(KEYS.monitoring, v),
 
   loadOnboardingComplete: () => readJson<boolean>(KEYS.onboardingComplete),
   saveOnboardingComplete: (v: boolean) => writeJson(KEYS.onboardingComplete, v),

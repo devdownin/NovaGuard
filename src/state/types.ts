@@ -60,7 +60,16 @@ export interface Permissions {
 
 export interface Settings {
   camera: Camera;
-  boot: boolean;
+  /**
+   * Resume monitoring when the app is opened.
+   *
+   * Not "start at boot": Android forbids launching a camera foreground service
+   * from a BOOT_COMPLETED receiver, or from the background at all, because
+   * camera is a while-in-use permission. Reopening the app is the earliest
+   * moment surveillance can legally come back.
+   * https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start
+   */
+  resumeOnLaunch: boolean;
   night: boolean;
   person: boolean;
   animal: boolean;
@@ -75,8 +84,6 @@ export interface Settings {
   autoDel: boolean;
   notif: boolean;
   notifDet: boolean;
-  sound: boolean;
-  vibe: boolean;
   exp: ExpandedSections;
 }
 

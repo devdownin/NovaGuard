@@ -3,7 +3,11 @@
 // device found. That's enough for App.test.tsx to render the fallback UI
 // without crashing — it doesn't exercise real camera or recording behavior.
 module.exports = {
-  Camera: () => null,
+  Camera: Object.assign(() => null, {
+    // Static permission getters used for the resume-on-launch decision.
+    getCameraPermissionStatus: () => 'denied',
+    getMicrophonePermissionStatus: () => 'denied',
+  }),
   useCameraDevice: () => undefined,
   useCameraFormat: () => undefined,
   useCameraPermission: () => ({ hasPermission: false, requestPermission: jest.fn() }),
