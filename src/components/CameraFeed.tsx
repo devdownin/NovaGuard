@@ -19,6 +19,16 @@ const MODEL = require('../../assets/models/efficientdet-lite0.tflite');
 /** EfficientDet-Lite0 takes a 320x320 uint8 image (verified against the model file). */
 const MODEL_INPUT_SIZE = 320;
 
+/**
+ * Frames per second handed to the model.
+ *
+ * This is what "Sensibilité" actually controls, and it is worth being explicit
+ * about: it sets how often the scene is looked at, so it governs how quickly a
+ * subject is confirmed and how responsive the auto-zoom feels. It no longer
+ * governs how long an occlusion is tolerated — the tracker counts that in
+ * milliseconds (see `dropAfterMs`) so the same gap means the same thing at
+ * every setting.
+ */
 const FPS_BY_SENSITIVITY = { Basse: 1, Moyenne: 3, Haute: 5 } as const;
 
 interface CameraFeedProps {
@@ -53,6 +63,13 @@ export function CameraFeed({
   // The recording quality setting picks the format; without this the camera
   // would record at whatever default the device chooses and the 720p/1080p/4K
   // rows would mean nothing.
+  //
+  // It also sets the size of the frames this component analyses: VisionCamera
+  // builds the frame-processor ImageAnalysis `.forSize(format.videoSize)`, so
+  // recording in 4K means downscaling 8.3 MP to 320x320 on every analysed
+  // frame instead of 2.1 MP. There is no separate analysis resolution to ask
+  // for in VisionCamera 4, so the cost is inherent — Setup says so rather than
+  // hiding it.
   const format = useCameraFormat(device, [
     { videoResolution: qualityResolution(settings.quality) },
   ]);
