@@ -1,7 +1,22 @@
 import {
-  bytesToReclaim, clipFileName, clipOutcome, eventsToReclaim, expiredEvents, formatBytes, LOW_SPACE_BYTES,
-  maxDurationMs, postRollMs, qualityBitRate, qualityResolution, retentionDays,
-  sameDay, todayCount, totalBytes,
+  bytesToReclaim,
+  clipFileName,
+  clipOutcome,
+  eventsToReclaim,
+  expiredEvents,
+  formatBytes,
+  LOW_SPACE_BYTES,
+  maxDurationMs,
+  nextEventId,
+  periodDays,
+  periodRange,
+  postRollMs,
+  qualityBitRate,
+  qualityResolution,
+  retentionDays,
+  sameDay,
+  todayCount,
+  totalBytes,
 } from '../src/recording/library';
 import { DetectionEvent } from '../src/state/types';
 
@@ -202,5 +217,37 @@ describe('clipOutcome', () => {
       clipOutcome(false, 1), clipOutcome(false, 0),
     ]);
     expect([...seen].sort()).toEqual(['attach', 'discard', 'event-only']);
+  });
+});
+
+describe('nextEventId', () => {
+  it('uses the timestamp when nothing collides', () => {
+    expect(nextEventId(0, 1_000)).toBe(1_000);
+    expect(nextEventId(900, 1_000)).toBe(1_000);
+  });
+
+  it('steps past an id already taken in the same millisecond', () => {
+    expect(nextEventId(1_000, 1_000)).toBe(1_001);
+    expect(nextEventId(1_001, 1_000)).toBe(1_002);
+  });
+});
+
+describe('periodRange', () => {
+  const now = new Date(2026, 8, 2, 15).getTime();
+  const midnight = (m: number, d: number) => new Date(2026, m - 1, d).getTime();
+
+  it('covers exactly the days each period names', () => {
+    expect(periodRange("Aujourd'hui", now)).toEqual({ from: midnight(9, 2), to: midnight(9, 3) });
+    expect(periodRange('7 jours', now).from).toBe(midnight(8, 27));
+    expect(periodRange('30 jours', now).from).toBe(midnight(8, 4));
+  });
+
+  it('is unbounded below for Tout, and never includes the future', () => {
+    expect(periodRange('Tout', now)).toEqual({ from: -Infinity, to: midnight(9, 3) });
+  });
+
+  it('maps every period to a day count', () => {
+    expect(periodDays("Aujourd'hui")).toBe(0);
+    expect(periodDays('Tout')).toBeNull();
   });
 });

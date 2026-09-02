@@ -12,16 +12,17 @@ import {
   defaultDetToday, defaultEvents, defaultLastDet, defaultSettings,
 } from './defaults';
 import { dropStaleKeys, storage } from './storage';
-import { daysAgo, formatClock, pad } from '../utils/date';
-import { DetectionBox, FrameDetection } from '../ml/types';
-import { confirmedTracks, primaryTrack, Track, updateTracks } from '../ml/tracker';
+import { pad } from '../utils/date';
+import { useLatest } from '../utils/useLatest';
+import { FrameDetection } from '../ml/types';
+import { confirmedTracks, primaryTrack, sameVisibleTracks, Track, updateTracks } from '../ml/tracker';
 import { Clip, useRecorder } from '../recording/useRecorder';
 import {
   bytesToReclaim, clipFileName, clipOutcome, eventsToReclaim, expiredEvents, MIN_FREE_BYTES,
-  postRollMs, sameDay, todayCount, totalBytes,
+  nextEventId, periodRange, postRollMs, sameDay, todayCount, totalBytes,
 } from '../recording/library';
 import {
-  deleteFiles, orphanedRecordings, renameRecording, storageInfo,
+  deleteFile, deleteFiles, orphanedRecordings, renameRecording, storageInfo,
 } from '../recording/videoStore';
 import {
   dismissDetectionAlert, foregroundServiceError, hasNotificationPermission, notifyDetection,
@@ -39,17 +40,8 @@ interface AppStateValue {
 
   // surveillance
   monitoring: boolean;
+  /** What the current session is recording, or null. Survives the post-roll. */
   det: DetectionKind | null;
-  conf: number;
-  box: DetectionBox | null;
-  /** Every confirmed subject currently in frame, for the overlay. */
-  tracks: Track[];
-  /** Which of those tracks is driving the recording session. */
-  primaryTrackId: number | null;
-  /** Aspect ratio (w/h) of the uprighted camera frame, for mapping boxes onto the preview. */
-  frameAspect: number;
-  recSec: number;
-  clock: string;
   detToday: number;
   lastDet: string;
   /** True only while a clip is actually being written to disk. */
@@ -74,6 +66,8 @@ interface AppStateValue {
   periodOpen: boolean;
   togglePeriodOpen: () => void;
   selected: number | null;
+  /** The event `selected` names, resolved once for every consumer that needs it. */
+  selectedEvent: DetectionEvent | null;
   selectEvent: (id: number | null) => void;
 
   // confirmations
@@ -121,7 +115,27 @@ interface AppStateValue {
   grantPermission: (key: keyof Permissions) => void;
 }
 
+/**
+ * State that changes at the frame-processor rate, kept out of {@link AppStateValue}.
+ *
+ * Everything here is redrawn up to five times a second while surveillance runs.
+ * Carrying it in the main context meant every consumer — the camera, the tab
+ * bar, the sheets, the confirm dialogs — re-rendered at that rate, since a new
+ * context value re-renders all of its consumers regardless of which field
+ * changed. Only `DetectionOverlay` and `RecTimer` read any of it.
+ */
+export interface ViewfinderState {
+  /** Every confirmed subject currently in frame, for the overlay. */
+  tracks: Track[];
+  /** Which of those tracks is driving the recording session. */
+  primaryTrackId: number | null;
+  /** Aspect ratio (w/h) of the uprighted camera frame, for mapping boxes onto the preview. */
+  frameAspect: number;
+  recSec: number;
+}
+
 const AppStateCtx = createContext<AppStateValue | null>(null);
+const ViewfinderCtx = createContext<ViewfinderState | null>(null);
 
 function cycle<T>(options: readonly T[], current: T): T {
   const i = options.indexOf(current);
@@ -154,13 +168,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   const [monitoring, setMonitoring] = useState(false);
   const [det, setDet] = useState<DetectionKind | null>(null);
-  const [conf, setConf] = useState(0);
-  const [box, setBox] = useState<DetectionBox | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [primaryTrackId, setPrimaryTrackId] = useState<number | null>(null);
   const [frameAspect, setFrameAspect] = useState(9 / 16);
   const [recSec, setRecSec] = useState(0);
-  const [clock, setClock] = useState(() => formatClock(new Date()));
   const [detToday, setDetToday] = useState(defaultDetToday);
   const [lastDet, setLastDet] = useState(defaultLastDet);
   const [recError, setRecError] = useState<string | null>(null);
@@ -217,7 +228,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       // spreading it whole would leave those undefined.
       const restored = s ? { ...defaultSettings, ...s } : defaultSettings;
       setSettings(restored);
-      if (ev) setEvents(ev);
+      if (ev) {
+        setEvents(ev);
+        lastEventIdRef.current = ev.reduce((max, e) => Math.max(max, e.id), 0);
+      }
       setDetToday(todayCount(dt, Date.now()));
       if (ld) setLastDet(ld);
       setOnb(onboarded ? null : 'intro');
@@ -270,14 +284,15 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     return () => clearTimeout(arm);
   }, [hydrated, monitoring]);
 
-  // ── live clock, independent of monitoring ───────────────────────────
+  // ── midnight rollover ───────────────────────────────────────────────
+  // The displayed clock is not state here: it changes every second and only one
+  // Text renders it, so `LiveClock` owns its own tick. This effect keeps only
+  // the part that is app state — rolling the daily counter over for a session
+  // left running overnight, which hydration alone would catch a launch too late.
   const dayRef = useRef(Date.now());
   useEffect(() => {
     const iv = setInterval(() => {
       const now = Date.now();
-      setClock(formatClock(new Date(now)));
-      // Roll the daily counter over at midnight for a session left running
-      // overnight — hydration alone would only catch it on the next launch.
       if (!sameDay(dayRef.current, now)) {
         dayRef.current = now;
         setDetToday(0);
@@ -301,6 +316,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const postRollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** When the last detection alert went out, for the cooldown. */
   const lastAlertRef = useRef<number | null>(null);
+  /**
+   * Last event id minted. Owned here rather than derived from `events[0]`,
+   * which would only be the highest id while the list happens to be sorted
+   * newest-first — an invariant nothing enforces, least of all the bare
+   * `JSON.parse` that restores it from disk.
+   */
+  const lastEventIdRef = useRef(0);
 
   const commitEvent = useCallback((
     kind: DetectionKind, dur: number, c: number, clip: Clip | null, at: number = Date.now(),
@@ -308,9 +330,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     const now = at;
     setDetToday(v => v + 1);
     setLastDet(pad(new Date(now).getHours()) + ':' + pad(new Date(now).getMinutes()));
+    // Minted outside the updater: React may invoke an updater twice, and an id
+    // that advanced on each invocation would not be the one that got committed.
+    const id = nextEventId(lastEventIdRef.current, now);
+    lastEventIdRef.current = id;
     setEvents(evs => [
       {
-        id: now,
+        id,
         kind,
         timestamp: now,
         // Prefer the encoder's own duration: it counts what is actually in the
@@ -327,7 +353,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const clearSession = useCallback(() => {
     sessionKindRef.current = null;
     setDet(null);
-    setBox(null);
     setRecSec(0);
   }, []);
 
@@ -358,14 +383,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       case 'discard':
         // A stop that raced the session ending, or the component going away
         // mid-clip. Nothing will ever point at this file.
-        deleteFiles([clip.path]);
+        deleteFile(clip.path);
         return;
 
       case 'event-only':
         // The encoder produced an empty file. Keep the sighting, drop the husk:
         // an unplayable 0-byte row in the history is worse than none.
         if (!pending) clearSession();
-        deleteFiles([clip.path]);
+        deleteFile(clip.path);
         commitEvent(meta!.kind, meta!.dur, meta!.conf, null);
         return;
 
@@ -392,16 +417,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   // worklet several times a second.
   const { isRecording, start: startRecording, stop: stopRecording } = recorder;
 
-  // Same reason: free space changes whenever the library is re-measured, and
-  // reading it through a ref keeps `reportDetections` stable across those.
-  const freeSpaceRef = useRef(0);
-  useEffect(() => { freeSpaceRef.current = store.free; }, [store.free]);
-
-  // Likewise for the alert switches: toggling one must not rebuild the worklet.
-  const alertSettingsRef = useRef({ notif: settings.notif, notifDet: settings.notifDet });
-  useEffect(() => {
-    alertSettingsRef.current = { notif: settings.notif, notifDet: settings.notifDet };
-  }, [settings.notif, settings.notifDet]);
+  // Same reason: everything `reportDetections` reads that changes while it runs
+  // goes through a ref, so its identity — and the worklet's — survives.
+  const freeSpaceRef = useLatest(store.free);
+  const settingsRef = useLatest(settings);
 
   const cancelPostRoll = useCallback(() => {
     if (postRollRef.current) {
@@ -430,8 +449,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
     const next = updateTracks(tracksRef.current, detections, Date.now());
     tracksRef.current = next;
+    // Keep the previous array when nothing moved: every other setter here
+    // already bails on `Object.is`, so this is what makes a still scene free.
     const visible = confirmedTracks(next);
-    setTracks(visible);
+    setTracks(prev => (sameVisibleTracks(prev, visible) ? prev : visible));
 
     const primary = primaryTrack(next);
     setPrimaryTrackId(primary ? primary.id : null);
@@ -457,7 +478,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         // closes: the point of a surveillance alert is that someone is there
         // now, not that someone was there for the last thirty seconds.
         const now = Date.now();
-        if (shouldAlert(alertSettingsRef.current, lastAlertRef.current, now)) {
+        if (shouldAlert(settingsRef.current, lastAlertRef.current, now)) {
           lastAlertRef.current = now;
           const { title, body } = alertContent(primary.kind, now);
           notifyDetection(title, body);
@@ -467,8 +488,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         setRecSec(Math.floor((Date.now() - sessionStartRef.current) / 1000));
       }
       setDet(primary.kind);
-      setConf(Math.round(primary.confidence * 100));
-      setBox(primary.box);
       return;
     }
 
@@ -479,9 +498,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       postRollRef.current = setTimeout(() => {
         postRollRef.current = null;
         endSession();
-      }, postRollMs(settings.post));
+      }, postRollMs(settingsRef.current.post));
     }
-  }, [cancelPostRoll, endSession, settings.post, startRecording]);
+  }, [cancelPostRoll, endSession, freeSpaceRef, settingsRef, startRecording]);
 
   const toggleMonitoring = useCallback(() => {
     // Closing the session has to happen outside the updater: React may invoke
@@ -582,13 +601,16 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   const askDelete = useCallback(() => setConfirmDelete(true), []);
   const cancelDelete = useCallback(() => setConfirmDelete(false), []);
+  const selectedEvent = useMemo(
+    () => events.find(e => e.id === selected) ?? null,
+    [events, selected],
+  );
   const doDelete = useCallback(() => {
-    const victim = events.find(e => e.id === selected);
-    if (victim) deleteFiles([victim.path]);
+    if (selectedEvent) deleteFile(selectedEvent.path);
     setEvents(evs => evs.filter(e => e.id !== selected));
     setSelected(null);
     setConfirmDelete(false);
-  }, [events, selected]);
+  }, [selected, selectedEvent]);
 
   const askWipe = useCallback(() => setConfirmWipe(true), []);
   const cancelWipe = useCallback(() => setConfirmWipe(false), []);
@@ -661,10 +683,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AppStateValue>(() => ({
     hydrated,
     tab, setTab,
-    monitoring, det, conf, box, tracks, primaryTrackId, frameAspect, recSec, clock, detToday, lastDet,
+    monitoring, det, detToday, lastDet,
     recording: isRecording, recError, storage: store, cameraRef, reportCameraProblem,
     toggleMonitoring, reportDetections,
-    events, filter, setFilter, period, setPeriod, periodOpen, togglePeriodOpen, selected, selectEvent,
+    events, filter, setFilter, period, setPeriod, periodOpen, togglePeriodOpen, selected, selectedEvent, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete,
     confirmWipe, askWipe, cancelWipe, doWipe,
     settings, toggleSection, cycleCamera, toggleResumeOnLaunch, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom,
@@ -673,9 +695,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     info, openInfo, closeInfo,
     onb, perms, onbNext, onbFinish, grantPermission,
   }), [
-    hydrated, tab, monitoring, det, conf, box, tracks, primaryTrackId, frameAspect, recSec, clock, detToday, lastDet,
+    hydrated, tab, monitoring, det, detToday, lastDet,
     isRecording, recError, store, cameraRef, reportCameraProblem, toggleMonitoring, reportDetections,
-    events, filter, period, periodOpen, togglePeriodOpen, selected, selectEvent,
+    events, filter, period, periodOpen, togglePeriodOpen, selected, selectedEvent, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete, confirmWipe, askWipe, cancelWipe, doWipe,
     settings, toggleSection, cycleCamera, toggleResumeOnLaunch, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom,
     setSensitivity, setThreshold, cyclePost, cycleMax, cycleQuality, setRetention,
@@ -683,7 +705,22 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     info, openInfo, closeInfo, onb, perms, onbNext, onbFinish, grantPermission,
   ]);
 
-  return <AppStateCtx.Provider value={value}>{children}</AppStateCtx.Provider>;
+  const viewfinderValue = useMemo<ViewfinderState>(
+    () => ({ tracks, primaryTrackId, frameAspect, recSec }),
+    [tracks, primaryTrackId, frameAspect, recSec],
+  );
+
+  return (
+    <AppStateCtx.Provider value={value}>
+      <ViewfinderCtx.Provider value={viewfinderValue}>{children}</ViewfinderCtx.Provider>
+    </AppStateCtx.Provider>
+  );
+}
+
+export function useViewfinderState(): ViewfinderState {
+  const ctx = useContext(ViewfinderCtx);
+  if (!ctx) throw new Error('useViewfinderState must be used within AppStateProvider');
+  return ctx;
 }
 
 export function useAppState(): AppStateValue {
@@ -694,14 +731,13 @@ export function useAppState(): AppStateValue {
 
 export function useFilteredEvents(): { shown: DetectionEvent[]; totalCount: number } {
   const { events, filter, period } = useAppState();
-  const shown = useMemo(() => events.filter(e => {
-    if (filter === 'Personnes' && e.kind !== 'Personne') return false;
-    if (filter === 'Animaux' && e.kind !== 'Animal') return false;
-    const diff = daysAgo(e.timestamp);
-    if (period === "Aujourd'hui" && diff !== 0) return false;
-    if (period === '7 jours' && diff > 6) return false;
-    if (period === '30 jours' && diff > 29) return false;
-    return true;
-  }), [events, filter, period]);
+  const shown = useMemo(() => {
+    const { from, to } = periodRange(period, Date.now());
+    return events.filter(e => {
+      if (filter === 'Personnes' && e.kind !== 'Personne') return false;
+      if (filter === 'Animaux' && e.kind !== 'Animal') return false;
+      return e.timestamp >= from && e.timestamp < to;
+    });
+  }, [events, filter, period]);
   return { shown, totalCount: events.length };
 }

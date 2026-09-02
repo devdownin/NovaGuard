@@ -3,7 +3,14 @@
  */
 
 import {
-  confirmedTracks, DEFAULT_TRACKER_OPTIONS, iou, primaryTrack, resetTrackIds, Track, updateTracks,
+  confirmedTracks,
+  DEFAULT_TRACKER_OPTIONS,
+  iou,
+  primaryTrack,
+  resetTrackIds,
+  sameVisibleTracks,
+  Track,
+  updateTracks,
 } from '../src/ml/tracker';
 import { FrameDetection } from '../src/ml/types';
 
@@ -178,5 +185,36 @@ describe('primaryTrack', () => {
     tracks = updateTracks(tracks, [], 1100 + DEFAULT_TRACKER_OPTIONS.dropAfterMs);
     expect(tracks).toHaveLength(0);
     expect(primaryTrack(tracks)).toBeNull();
+  });
+});
+
+describe('sameVisibleTracks', () => {
+  /** A track confirmed at `x`, as the overlay would receive it. */
+  const shown = (x: number, confidence = 0.9) => {
+    // Same id every time, so a comparison isolates the fields under test.
+    resetTrackIds();
+    const seen = [person(x, 0.3, confidence)];
+    return confirmedTracks(updateTracks(updateTracks([], seen, 1000), seen, 1100));
+  };
+
+  it('holds for an unchanged list, whatever the array identity', () => {
+    expect(sameVisibleTracks(shown(0.3), shown(0.3))).toBe(true);
+    expect(sameVisibleTracks([], [])).toBe(true);
+  });
+
+  it('breaks as soon as a box moves', () => {
+    expect(sameVisibleTracks(shown(0.3), shown(0.36))).toBe(false);
+  });
+
+  it('breaks when a subject joins or leaves', () => {
+    expect(sameVisibleTracks(shown(0.1), [])).toBe(false);
+  });
+
+  // The label shows a whole percent, so a raw-float wobble under it changes no
+  // pixel — treating it as a change would redraw the overlay on every frame a
+  // subject stands still.
+  it('ignores a confidence wobble too small to change the label', () => {
+    expect(sameVisibleTracks(shown(0.3, 0.9012), shown(0.3, 0.9034))).toBe(true);
+    expect(sameVisibleTracks(shown(0.3, 0.901), shown(0.3, 0.915))).toBe(false);
   });
 });

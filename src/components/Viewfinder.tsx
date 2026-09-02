@@ -2,12 +2,13 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { color, font } from '../theme';
-import { useAppState } from '../state/AppStateContext';
+import { useAppState, useViewfinderState } from '../state/AppStateContext';
 import { useAutoZoom } from '../camera/useAutoZoom';
-import { uprightBoxToViewBox } from '../camera/framing';
 import { formatDuration } from '../utils/date';
 import { GridOverlay } from './GridOverlay';
 import { CameraFeed } from './CameraFeed';
+import { DetectionOverlay } from './DetectionOverlay';
+import { LiveClock } from './LiveClock';
 
 function ScanBeam() {
   const y = useRef(new Animated.Value(0)).current;
@@ -32,6 +33,15 @@ function ScanBeam() {
   );
 }
 
+/**
+ * The REC chip's elapsed time. A leaf of its own for the same reason as
+ * `LiveClock`: it ticks every second, and only this one string changes.
+ */
+function RecTimer() {
+  const { recSec } = useViewfinderState();
+  return <Text style={styles.recClock}>{formatDuration(recSec)}</Text>;
+}
+
 function RecDot() {
   const opacity = useRef(new Animated.Value(1)).current;
 
@@ -50,9 +60,11 @@ function RecDot() {
 }
 
 export function Viewfinder() {
+  // Deliberately reads no per-frame state: the two things that change at that
+  // rate — the detection boxes and the REC timer — are leaves below, so this
+  // component only re-renders when a session starts or a setting changes.
   const {
-    monitoring, det, tracks, primaryTrackId, frameAspect, recSec, clock, perms, settings,
-    recording, recError, cameraRef, reportCameraProblem,
+    monitoring, det, perms, settings, recording, recError, cameraRef, reportCameraProblem,
   } = useAppState();
 
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -120,31 +132,7 @@ export function Viewfinder() {
           onProblem={reportCameraProblem}
         />
 
-        {size.width > 0 && tracks.map(track => {
-          const viewBox = uprightBoxToViewBox(track.box, frameAspect, size.width, size.height);
-          const isPrimary = track.id === primaryTrackId;
-          return (
-            <View
-              key={track.id}
-              pointerEvents="none"
-              style={[
-                styles.detBox,
-                isPrimary ? styles.detBoxPrimary : styles.detBoxSecondary,
-                {
-                  left: `${viewBox.x * 100}%`,
-                  top: `${viewBox.y * 100}%`,
-                  width: `${viewBox.width * 100}%`,
-                  height: `${viewBox.height * 100}%`,
-                },
-              ]}
-            >
-              <View style={[styles.detLabelChip, !isPrimary && styles.detLabelChipSecondary]}>
-                <Text style={styles.detLabelText}>{track.kind}</Text>
-                <Text style={styles.detConfText}>{Math.round(track.confidence * 100)} %</Text>
-              </View>
-            </View>
-          );
-        })}
+        <DetectionOverlay viewWidth={size.width} viewHeight={size.height} />
       </Animated.View>
 
       {monitoring && <ScanBeam />}
@@ -158,7 +146,7 @@ export function Viewfinder() {
         <View style={styles.recChip}>
           <RecDot />
           <Text style={styles.recLabel}>REC</Text>
-          <Text style={styles.recClock}>{formatDuration(recSec)}</Text>
+          <RecTimer />
         </View>
       )}
 
@@ -176,7 +164,7 @@ export function Viewfinder() {
         </View>
       )}
 
-      <Text style={styles.clockText}>{clock}</Text>
+      <LiveClock style={styles.clockText} />
     </View>
   );
 }
@@ -233,47 +221,6 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 70,
-  },
-  detBox: {
-    position: 'absolute',
-    borderRadius: 6,
-  },
-  detBoxPrimary: {
-    borderWidth: 1.5,
-    borderColor: color.accent,
-  },
-  // Extra subjects stay visible without competing with the one driving the recording.
-  detBoxSecondary: {
-    borderWidth: 1,
-    borderColor: color.accent700,
-  },
-  detLabelChip: {
-    position: 'absolute',
-    top: -25,
-    left: -1.5,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 5,
-    backgroundColor: 'rgba(22,24,38,0.82)',
-    borderWidth: 1,
-    borderColor: color.accent700,
-  },
-  detLabelChipSecondary: {
-    opacity: 0.75,
-  },
-  detLabelText: {
-    fontFamily: font.medium,
-    fontSize: 10.5,
-    letterSpacing: 0.4,
-    color: color.accent300,
-  },
-  detConfText: {
-    fontFamily: font.regular,
-    fontSize: 10.5,
-    color: color.neutral400,
   },
   overlayChip: {
     position: 'absolute',
