@@ -72,6 +72,30 @@ a cassé tous les builds d'APK sans qu'aucune PR verte ne le signale. D'où l'é
 `xmllint` dans le job `check`. Une erreur Android ne peut pas être attrapée par
 tsc, eslint ou jest.
 
+## Construire l'APK
+
+Le SDK Android n'est pas nécessaire sur la machine : `Dockerfile` porte la
+chaîne d'outils, épinglée sur exactement ce que `android/build.gradle` demande
+(plateforme 36, build-tools 36.0.0, NDK 27.1.12297006, CMake 3.30.5, JDK 17,
+Node 22). L'image ne contient que les outils ; les sources sont montées.
+
+```bash
+docker build -t novaguard-android .
+docker run --rm -v "$PWD":/app -w /app novaguard-android \
+  bash -lc 'npm ci && cd android && ./gradlew assembleRelease'
+```
+
+L'APK sort dans `android/app/build/outputs/apk/release/`. Gradle tourne en root
+par défaut et laissera des répertoires de build appartenant à root sur l'hôte —
+passez `--user "$(id -u):$(id -g)"` avec un HOME accessible en écriture si ça
+vous gêne.
+
+Le workflow `android-image.yml` reconstruit l'image et **fabrique un APK avec**
+dès qu'un de ces fichiers change : une image qui ne produirait plus rien échoue
+là, pas dans une release des semaines plus tard. Il est dans son propre fichier
+parce que GitHub ne filtre par `paths` qu'au niveau du workflow, et personne ne
+doit payer plusieurs gigaoctets de SDK sur une PR ordinaire.
+
 ## Tests
 
 Jest, avec des mocks pour tout ce qui est natif (`__mocks__/`,
