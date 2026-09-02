@@ -25,6 +25,18 @@ class SurveillanceServiceModule(reactContext: ReactApplicationContext) :
 
   override fun isRunning(): Boolean = SurveillanceService.isRunning
 
+  override fun notifyDetection(title: String, body: String) {
+    DetectionNotifier.notify(reactApplicationContext, title, body)
+  }
+
+  override fun dismissDetection() {
+    DetectionNotifier.dismiss(reactApplicationContext)
+  }
+
+  override fun openDetectionChannelSettings() {
+    DetectionNotifier.openChannelSettings(reactApplicationContext)
+  }
+
   companion object {
     const val NAME = "SurveillanceService"
   }

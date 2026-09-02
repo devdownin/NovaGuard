@@ -127,6 +127,46 @@ describe('cold start', () => {
     expect(shown).toEqual(expect.arrayContaining(['0']));
   });
 
+  it('resumes monitoring only when the camera permission is actually held', async () => {
+    await AsyncStorage.setItem('@novaguard:onboardingComplete', 'true');
+    await AsyncStorage.setItem('@novaguard:monitoring', 'true');
+    await AsyncStorage.setItem(
+      '@novaguard:settings',
+      JSON.stringify({ ...defaultSettings, resumeOnLaunch: true }),
+    );
+
+    // The mocked permission is denied, so surveillance must stay off: a
+    // camera foreground service cannot start without it.
+    const shown = texts(await finishBoot(await startApp()));
+    expect(shown).toEqual(expect.arrayContaining(['DÉMARRER LA SURVEILLANCE']));
+    expect(shown).not.toEqual(expect.arrayContaining(['ARRÊTER LA SURVEILLANCE']));
+  });
+
+  it('leaves monitoring off when resume-on-launch is disabled', async () => {
+    await AsyncStorage.setItem('@novaguard:onboardingComplete', 'true');
+    await AsyncStorage.setItem('@novaguard:monitoring', 'true');
+    await AsyncStorage.setItem(
+      '@novaguard:settings',
+      JSON.stringify({ ...defaultSettings, resumeOnLaunch: false }),
+    );
+
+    const shown = texts(await finishBoot(await startApp()));
+    expect(shown).toEqual(expect.arrayContaining(['DÉMARRER LA SURVEILLANCE']));
+  });
+
+  it('fills in fields missing from a settings object written by an older build', async () => {
+    await AsyncStorage.setItem('@novaguard:onboardingComplete', 'true');
+    // No `quality`, no `retention`, and the long-gone `boot`/`sound`/`vibe`.
+    await AsyncStorage.setItem('@novaguard:settings', JSON.stringify({
+      camera: 'Avant', boot: true, sound: true, vibe: false,
+    }));
+
+    // Reaching the shell at all means the merge filled the gaps; a raw spread
+    // would have left `exp` undefined and thrown on the first section render.
+    const shown = texts(await finishBoot(await startApp()));
+    expect(shown).toEqual(expect.arrayContaining(['NOVAGUARD', 'Setup']));
+  });
+
   it('skips onboarding when it has already been completed', async () => {
     await AsyncStorage.setItem('@novaguard:onboardingComplete', 'true');
     const shown = texts(await finishBoot(await startApp()));
