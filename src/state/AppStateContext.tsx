@@ -133,6 +133,15 @@ const POST_OPTIONS: PostRoll[] = ['5 s', '10 s', '30 s'];
 const MAX_OPTIONS: MaxDuration[] = ['1 min', '2 min', '5 min'];
 const QUALITY_OPTIONS: Quality[] = ['720p', '1080p', '4K'];
 
+/**
+ * How long surveillance has to survive before it is worth resuming next launch.
+ *
+ * Long enough to cover the whole fragile stretch — foreground service, camera
+ * session, model load, first frames — which is exactly where a start that is
+ * going to fail does so.
+ */
+export const RESUME_ARM_MS = 8000;
+
 // Sessions now follow the tracker: one opens when a subject is *confirmed*
 // (seen on consecutive frames) and closes when every track has been dropped,
 // which is what stops a single lucky frame from writing a history event and
@@ -241,7 +250,25 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     if (hydrated) storage.saveDetToday({ count: detToday, day: Date.now() });
   }, [hydrated, detToday]);
   useEffect(() => { if (hydrated) storage.saveLastDet(lastDet); }, [hydrated, lastDet]);
-  useEffect(() => { if (hydrated) storage.saveMonitoring(monitoring); }, [hydrated, monitoring]);
+  /**
+   * Remember that surveillance was on — but only once it has proved survivable.
+   *
+   * Writing it the instant the button is pressed turns any crash during startup
+   * into a trap the user cannot get out of: the crash persists `true`, the next
+   * launch auto-resumes because of it, and the app dies again before anyone can
+   * reach the setting that would stop it. Arming the flag a few seconds in
+   * means a start that fails never asks to be repeated, while a session that
+   * ran fine and was cut short still comes back.
+   */
+  useEffect(() => {
+    if (!hydrated) return undefined;
+    if (!monitoring) {
+      storage.saveMonitoring(false);
+      return undefined;
+    }
+    const arm = setTimeout(() => storage.saveMonitoring(true), RESUME_ARM_MS);
+    return () => clearTimeout(arm);
+  }, [hydrated, monitoring]);
 
   // ── live clock, independent of monitoring ───────────────────────────
   const dayRef = useRef(Date.now());
@@ -473,7 +500,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     // is thrown inside the service — nowhere a caller can catch it. Ask instead.
     if (!cameraPermission.hasPermission) {
       setRecError('Autorisez la caméra pour démarrer la surveillance');
-      cameraPermission.requestPermission();
+      cameraPermission.requestPermission().then(granted => {
+        // Carry on rather than making the user find the button again.
+        if (granted) {
+          setRecError(null);
+          setMonitoring(true);
+        }
+      });
       return;
     }
     setRecError(null);

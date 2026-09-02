@@ -12,7 +12,8 @@
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 import { useCameraPermission } from 'react-native-vision-camera';
-import { AppStateProvider, useAppState } from '../src/state/AppStateContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AppStateProvider, RESUME_ARM_MS, useAppState } from '../src/state/AppStateContext';
 import { startForegroundService } from '../src/surveillance/foregroundService';
 
 jest.mock('../src/surveillance/foregroundService', () => ({
@@ -49,11 +50,15 @@ async function mount() {
 
 const requestPermission = jest.fn();
 
-beforeEach(() => {
+beforeEach(async () => {
   // The provider runs a 1 s clock; on real timers it fires throughout the test
   // and buries the output in act() warnings.
   jest.useFakeTimers();
   jest.clearAllMocks();
+  await AsyncStorage.clear();
+  // The real hook always returns a promise; default to a refusal so tests that
+  // do not care about the prompt still exercise a realistic shape.
+  requestPermission.mockResolvedValue(false);
   permission.mockReturnValue({ hasPermission: false, requestPermission });
 });
 
@@ -89,4 +94,66 @@ it('stops again without needing any permission', async () => {
   ReactTestRenderer.act(() => { box.state!.toggleMonitoring(); });
 
   expect(box.state!.monitoring).toBe(false);
+});
+
+describe('remembering that surveillance was on', () => {
+  const stored = () => AsyncStorage.getItem('@novaguard:monitoring');
+
+  beforeEach(() => {
+    permission.mockReturnValue({ hasPermission: true, requestPermission });
+  });
+
+  it('does not remember a start that has not survived yet', async () => {
+    // The trap this avoids: a crash during startup persists "on", the next
+    // launch auto-resumes because of it, and the app dies again before anyone
+    // can reach the setting that would stop it.
+    const box = await mount();
+    await ReactTestRenderer.act(async () => { box.state!.toggleMonitoring(); });
+    await ReactTestRenderer.act(async () => {
+      jest.advanceTimersByTime(RESUME_ARM_MS - 500);
+    });
+    await expect(stored()).resolves.not.toBe('true');
+  });
+
+  it('remembers it once it has run long enough to be worth resuming', async () => {
+    const box = await mount();
+    await ReactTestRenderer.act(async () => { box.state!.toggleMonitoring(); });
+    await ReactTestRenderer.act(async () => {
+      jest.advanceTimersByTime(RESUME_ARM_MS + 100);
+    });
+    await expect(stored()).resolves.toBe('true');
+  });
+
+  it('forgets it immediately when surveillance is stopped', async () => {
+    const box = await mount();
+    await ReactTestRenderer.act(async () => { box.state!.toggleMonitoring(); });
+    await ReactTestRenderer.act(async () => {
+      jest.advanceTimersByTime(RESUME_ARM_MS + 100);
+    });
+    await ReactTestRenderer.act(async () => { box.state!.toggleMonitoring(); });
+    await ReactTestRenderer.act(async () => {});
+    await expect(stored()).resolves.toBe('false');
+  });
+});
+
+describe('granting the permission from the button', () => {
+  it('starts as soon as the user says yes, instead of dead-ending', async () => {
+    requestPermission.mockResolvedValue(true);
+    const box = await mount();
+    await ReactTestRenderer.act(async () => { box.state!.toggleMonitoring(); });
+    await ReactTestRenderer.act(async () => {});
+
+    expect(box.state!.monitoring).toBe(true);
+    expect(box.state!.recError).toBeNull();
+  });
+
+  it('stays put and keeps the message if the user says no', async () => {
+    requestPermission.mockResolvedValue(false);
+    const box = await mount();
+    await ReactTestRenderer.act(async () => { box.state!.toggleMonitoring(); });
+    await ReactTestRenderer.act(async () => {});
+
+    expect(box.state!.monitoring).toBe(false);
+    expect(box.state!.recError).toBe('Autorisez la caméra pour démarrer la surveillance');
+  });
 });
