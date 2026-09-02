@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Lets an APK be built on demand from any branch in the Actions tab — this
+  # workflow only shows up in that UI's branch picker once it exists on the
+  # default branch, so a not-yet-merged branch needs a manual first push there.
+  workflow_dispatch:
 
 jobs:
   check:
@@ -29,3 +33,64 @@ jobs:
 
       - name: Tests
         run: npm test -- --ci
+
+  build-apk:
+    name: Build Android APK
+    needs: check
+    runs-on: ubuntu-latest
+    # Runs after every merge to main, plus on demand (workflow_dispatch) for
+    # any branch — a native Android build is too slow to run on every PR push.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # Matches what @react-native/gradle-plugin aligns compileOptions to.
+          java-version: '17'
+
+      - name: Install Android SDK components
+        env:
+          # Pinned to what android/build.gradle and the RN gradle plugin
+          # actually request, so this doesn't silently drift from a version
+          # that isn't installed on the runner's preloaded SDK.
+          NDK_VERSION: 27.1.12297006
+          CMAKE_VERSION: 3.30.5
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;$NDK_VERSION" \
+            "cmake;$CMAKE_VERSION"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # arm64-v8a + x86_64 only (see android/gradle.properties). No signing
+      # secret needed: the release build type is signed with the debug
+      # keystore committed at android/app/debug.keystore, same as the RN
+      # template default — fine for sideloading onto a test device, but a
+      # real release needs its own keystore first (see
+      # https://reactnative.dev/docs/signed-apk-android).
+      - name: Build release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: novaguard-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
+          retention-days: 30
+          if-no-files-found: error

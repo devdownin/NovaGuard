@@ -46,6 +46,10 @@ npm run android
 
 `npm start` lance Metro séparément si besoin. Voir aussi [`CONTRIBUTING.md`](CONTRIBUTING.md) pour le détail des scripts (`lint`, `test`, `tsc`).
 
+### Récupérer un APK sans installer l'environnement Android
+
+Le workflow [`CI`](.github/workflows/ci.yml) construit un APK installable après chaque fusion sur `main`, et à la demande sur n'importe quelle branche : onglet **Actions** → *CI* → **Run workflow** (choisir la branche), puis récupérer `novaguard-release-apk` dans les artefacts du run une fois terminé. Aucun secret de signature n'est nécessaire — le build `release` est signé avec le keystore de debug du dépôt, ce qui suffit à installer l'application sur un appareil de test mais pas à la publier (voir [Signed APK](https://reactnative.dev/docs/signed-apk-android) pour un vrai keystore de production).
+
 ## Structure du projet
 
 ```
