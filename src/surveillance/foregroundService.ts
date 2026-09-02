@@ -33,6 +33,23 @@ export function stopForegroundService(): void {
   }
 }
 
+/**
+ * Why the foreground service refused to start, or null.
+ *
+ * `startForegroundService` only queues the start; everything that can go wrong
+ * — a missing camera permission, a foreground-service type Android will not
+ * grant from the current state — happens later, inside the service. It cannot
+ * surface as a thrown error here, so the service records it and we read it back.
+ */
+export function foregroundServiceError(): string | null {
+  if (!NativeSurveillanceService) return null;
+  try {
+    return NativeSurveillanceService.lastError() || null;
+  } catch {
+    return null;
+  }
+}
+
 export function isForegroundServiceRunning(): boolean {
   if (!NativeSurveillanceService) return false;
   try {

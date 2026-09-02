@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.novaguard.MainActivity
@@ -25,6 +26,11 @@ import com.novaguard.R
  * VisionCamera drives its own `LifecycleRegistry` from the `isActive` prop rather
  * than from the Activity's lifecycle, so the session itself survives the app
  * going to the background — this service is what makes the platform allow it.
+ *
+ * Nothing in here may throw. The JS wrapper guards its own call, but that call
+ * only asks the system to start a service: everything below runs later, on the
+ * service's own stack, where a JS try/catch cannot reach. An exception here
+ * takes the whole process down.
  */
 class SurveillanceService : Service() {
 
@@ -34,8 +40,28 @@ class SurveillanceService : Service() {
     val title = intent?.getStringExtra(EXTRA_TITLE) ?: getString(R.string.app_name)
     val body = intent?.getStringExtra(EXTRA_BODY).orEmpty()
 
-    createChannel()
-    startForeground(NOTIFICATION_ID, buildNotification(title, body), foregroundTypes())
+    // A foreground service of type `camera` requires the camera permission to be
+    // held at the moment it starts; without it startForeground throws
+    // SecurityException. Refusing here turns a crash into a message.
+    if (!hasPermission(Manifest.permission.CAMERA)) {
+      failAndStop("Permission caméra requise pour la surveillance en arrière-plan")
+      return START_NOT_STICKY
+    }
+
+    try {
+      createChannel()
+      startForeground(NOTIFICATION_ID, buildNotification(title, body), foregroundTypes())
+    } catch (e: Exception) {
+      // SecurityException (a type whose permission is missing),
+      // ForegroundServiceStartNotAllowedException (started from a state Android
+      // refuses), or anything an OEM adds. Stop cleanly rather than die — and
+      // stop promptly, so the system does not also raise a "did not start in
+      // time" violation against us.
+      failAndStop(e.message ?: e.javaClass.simpleName)
+      return START_NOT_STICKY
+    }
+
+    lastError = null
     isRunning = true
 
     // Deliberately not START_STICKY. The camera session lives in the React view
@@ -50,6 +76,16 @@ class SurveillanceService : Service() {
     super.onDestroy()
   }
 
+  private fun failAndStop(reason: String) {
+    Log.w(TAG, "Foreground service refused: $reason")
+    lastError = reason
+    isRunning = false
+    stopSelf()
+  }
+
+  private fun hasPermission(permission: String): Boolean =
+    ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+
   /**
    * Microphone is only declared when RECORD_AUDIO is actually granted: since
    * Android 14, starting a foreground service with a type whose permission is
@@ -58,9 +94,9 @@ class SurveillanceService : Service() {
    */
   private fun foregroundTypes(): Int {
     var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-    val micGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
-      PackageManager.PERMISSION_GRANTED
-    if (micGranted) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+    if (hasPermission(Manifest.permission.RECORD_AUDIO)) {
+      types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+    }
     return types
   }
 
@@ -89,7 +125,9 @@ class SurveillanceService : Service() {
     return NotificationCompat.Builder(this, CHANNEL_ID)
       .setContentTitle(title)
       .setContentText(body)
-      .setSmallIcon(R.mipmap.ic_launcher)
+      // A drawable, not the launcher mipmap: that one is an <adaptive-icon>,
+      // which is not a shape the status bar can flatten into a silhouette.
+      .setSmallIcon(R.drawable.ic_notification)
       .setContentIntent(pending)
       .setOngoing(true)
       .setSilent(true)
@@ -104,15 +142,21 @@ class SurveillanceService : Service() {
     const val EXTRA_TITLE = "title"
     const val EXTRA_BODY = "body"
 
+    private const val TAG = "NovaGuardService"
     private const val CHANNEL_ID = "novaguard.surveillance"
     private const val NOTIFICATION_ID = 1001
 
     /**
-     * Read from the JS side through the module. A plain flag is enough: the
+     * Read from the JS side through the module. Plain flags are enough: the
      * service is a singleton and both writes happen on the main thread.
      */
     @Volatile
     var isRunning: Boolean = false
+      private set
+
+    /** Why the last start was refused, or null if it went through. */
+    @Volatile
+    var lastError: String? = null
       private set
 
     fun start(context: Context, title: String, body: String) {
@@ -120,11 +164,21 @@ class SurveillanceService : Service() {
         putExtra(EXTRA_TITLE, title)
         putExtra(EXTRA_BODY, body)
       }
-      context.startForegroundService(intent)
+      lastError = null
+      try {
+        context.startForegroundService(intent)
+      } catch (e: Exception) {
+        // Android can refuse the start itself, before onStartCommand ever runs.
+        lastError = e.message ?: e.javaClass.simpleName
+      }
     }
 
     fun stop(context: Context) {
-      context.stopService(Intent(context, SurveillanceService::class.java))
+      try {
+        context.stopService(Intent(context, SurveillanceService::class.java))
+      } catch (e: Exception) {
+        Log.w(TAG, "stopService failed: ${e.message}")
+      }
     }
   }
 }
