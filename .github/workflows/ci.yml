@@ -3,12 +3,20 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
   # Lets an APK be built on demand from any branch in the Actions tab — this
   # workflow only shows up in that UI's branch picker once it exists on the
   # default branch, so a not-yet-merged branch needs a manual first push there.
   workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:
@@ -26,7 +34,7 @@ jobs:
         run: npm ci
 
       - name: Type check
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Lint
         run: npm run lint
@@ -38,9 +46,9 @@ jobs:
     name: Build Android APK
     needs: check
     runs-on: ubuntu-latest
-    # Runs after every merge to main, plus on demand (workflow_dispatch) for
-    # any branch — a native Android build is too slow to run on every PR push.
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    # Runs after every merge to main, on version tag pushes (e.g. v1.0.0), plus on demand
+    # (workflow_dispatch) for any branch — a native Android build is too slow to run on every PR push.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')))
     steps:
       - uses: actions/checkout@v4
 
@@ -87,10 +95,18 @@ jobs:
         working-directory: android
         run: ./gradlew assembleRelease --no-daemon
 
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: novaguard-release-apk
           path: android/app/build/outputs/apk/release/*.apk
           retention-days: 30
           if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: android/app/build/outputs/apk/release/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
