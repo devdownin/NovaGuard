@@ -25,6 +25,8 @@ class SurveillanceServiceModule(reactContext: ReactApplicationContext) :
 
   override fun isRunning(): Boolean = SurveillanceService.isRunning
 
+  override fun lastError(): String = SurveillanceService.lastError.orEmpty()
+
   override fun notifyDetection(title: String, body: String) {
     DetectionNotifier.notify(reactApplicationContext, title, body)
   }

@@ -10,6 +10,13 @@ export interface Spec extends TurboModule {
   start(title: string, body: string): void;
   stop(): void;
   isRunning(): boolean;
+  /**
+   * Why the last start was refused, or '' if it went through.
+   *
+   * The service starts asynchronously on its own stack, so a failure there
+   * cannot come back as a thrown error on the call that asked for it.
+   */
+  lastError(): string;
 
   /**
    * Posts (or replaces) the detection alert. One reusable notification rather

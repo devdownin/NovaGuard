@@ -1,4 +1,4 @@
-import React, { RefObject } from 'react';
+import React, { RefObject, useEffect } from 'react';
 import { StyleProp, ViewStyle } from 'react-native';
 import {
   Camera, runAsync, runAtTargetFps, useCameraDevice, useCameraFormat, useFrameProcessor,
@@ -41,6 +41,8 @@ interface CameraFeedProps {
   onFrame?: (faces: DetectionBox[], persons: DetectionBox[]) => void;
   /** Handed up so the recorder can call `startRecording`/`stopRecording` on it. */
   cameraRef?: RefObject<Camera | null>;
+  /** Camera and model failures, which are otherwise completely silent. */
+  onProblem?: (message: string | null) => void;
 }
 
 /**
@@ -51,7 +53,7 @@ interface CameraFeedProps {
  * (Viewfinder) falls back to the decorative standby view in that case.
  */
 export function CameraFeed({
-  style, active, viewWidth, viewHeight, onFrame, cameraRef,
+  style, active, viewWidth, viewHeight, onFrame, cameraRef, onProblem,
 }: CameraFeedProps) {
   const { perms, settings, reportDetections } = useAppState();
 
@@ -75,7 +77,14 @@ export function CameraFeed({
   ]);
 
   const { resize } = useResizePlugin();
-  const { model } = useDetectionModel(MODEL);
+  // `failed` used to be computed and thrown away, so a model both delegates
+  // refused looked exactly like a working camera that never sees anything.
+  const { model, failed: modelFailed } = useDetectionModel(MODEL);
+
+  useEffect(() => {
+    if (!onProblem) return;
+    onProblem(modelFailed ? 'Modèle de détection impossible à charger' : null);
+  }, [modelFailed, onProblem]);
 
   // `autoMode` asks the plugin to scale and rotate face bounds natively against
   // the window size we hand it — passing the viewfinder's own size means bounds
@@ -162,6 +171,7 @@ export function CameraFeed({
       frameProcessor={active ? frameProcessor : undefined}
       pixelFormat="yuv"
       resizeMode="cover"
+      onError={error => onProblem?.(`Caméra : ${error.message}`)}
       video={true}
       // Audio is only captured once the OS microphone permission is actually
       // granted — asking the camera for audio without it aborts the recording.

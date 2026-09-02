@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.novaguard.MainActivity
@@ -27,10 +28,20 @@ import com.novaguard.R
  */
 object DetectionNotifier {
 
+  private const val TAG = "NovaGuardNotifier"
   private const val CHANNEL_ID = "novaguard.detections"
   private const val NOTIFICATION_ID = 1002
 
   fun notify(context: Context, title: String, body: String) {
+    try {
+      post(context, title, body)
+    } catch (e: Exception) {
+      // An alert is never worth crashing surveillance for.
+      Log.w(TAG, "Detection notification refused: ${e.message}")
+    }
+  }
+
+  private fun post(context: Context, title: String, body: String) {
     createChannel(context)
 
     val open = Intent(context, MainActivity::class.java).apply {
@@ -43,7 +54,8 @@ object DetectionNotifier {
     val notification = NotificationCompat.Builder(context, CHANNEL_ID)
       .setContentTitle(title)
       .setContentText(body)
-      .setSmallIcon(R.mipmap.ic_launcher)
+      // A drawable, not the launcher mipmap — see SurveillanceService.
+      .setSmallIcon(R.drawable.ic_notification)
       .setContentIntent(pending)
       .setAutoCancel(true)
       .setCategory(NotificationCompat.CATEGORY_EVENT)
@@ -60,17 +72,26 @@ object DetectionNotifier {
   }
 
   fun dismiss(context: Context) {
-    NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+    try {
+      NotificationManagerCompat.from(context).cancel(NOTIFICATION_ID)
+    } catch (e: Exception) {
+      Log.w(TAG, "Dismiss failed: ${e.message}")
+    }
   }
 
   fun openChannelSettings(context: Context) {
-    createChannel(context)
-    val intent = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
-      putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-      putExtra(Settings.EXTRA_CHANNEL_ID, CHANNEL_ID)
-      flags = Intent.FLAG_ACTIVITY_NEW_TASK
+    try {
+      createChannel(context)
+      val intent = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
+        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        putExtra(Settings.EXTRA_CHANNEL_ID, CHANNEL_ID)
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+      }
+      context.startActivity(intent)
+    } catch (e: Exception) {
+      // Not every build ships that settings screen.
+      Log.w(TAG, "Channel settings unavailable: ${e.message}")
     }
-    context.startActivity(intent)
   }
 
   /** Idempotent: re-creating an existing channel leaves the user's own choices alone. */

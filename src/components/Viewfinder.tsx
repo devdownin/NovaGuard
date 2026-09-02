@@ -52,7 +52,7 @@ function RecDot() {
 export function Viewfinder() {
   const {
     monitoring, det, tracks, primaryTrackId, frameAspect, recSec, clock, perms, settings,
-    recording, recError, cameraRef,
+    recording, recError, cameraRef, reportCameraProblem,
   } = useAppState();
 
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -117,6 +117,7 @@ export function Viewfinder() {
           viewHeight={size.height}
           onFrame={autoZoom.submitFrame}
           cameraRef={cameraRef}
+          onProblem={reportCameraProblem}
         />
 
         {size.width > 0 && tracks.map(track => {

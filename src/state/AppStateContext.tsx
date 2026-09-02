@@ -24,7 +24,7 @@ import {
   deleteFiles, orphanedRecordings, renameRecording, storageInfo,
 } from '../recording/videoStore';
 import {
-  dismissDetectionAlert, hasNotificationPermission, notifyDetection,
+  dismissDetectionAlert, foregroundServiceError, hasNotificationPermission, notifyDetection,
   openDetectionChannelSettings, requestNotificationPermission, startForegroundService,
   stopForegroundService,
 } from '../surveillance/foregroundService';
@@ -59,6 +59,8 @@ interface AppStateValue {
   storage: StorageInfo;
   /** Passed down to the Camera so the recorder can drive it. */
   cameraRef: React.RefObject<VisionCamera | null>;
+  /** Camera runtime errors and model load failures, reported from CameraFeed. */
+  reportCameraProblem: (message: string | null) => void;
   toggleMonitoring: () => void;
   /** Called from the camera frame-processor (JS thread) with this frame's qualifying detections. */
   reportDetections: (detections: FrameDetection[], frameAspect: number) => void;
@@ -461,9 +463,22 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       endSession();
       tracksRef.current = [];
       setTracks([]);
+      setMonitoring(false);
+      return;
     }
-    setMonitoring(m => !m);
-  }, [endSession, monitoring]);
+
+    // Starting without the camera permission used to take the whole app down:
+    // the foreground service claims the `camera` type, Android requires the
+    // permission to be held at that moment, and the resulting SecurityException
+    // is thrown inside the service — nowhere a caller can catch it. Ask instead.
+    if (!cameraPermission.hasPermission) {
+      setRecError('Autorisez la caméra pour démarrer la surveillance');
+      cameraPermission.requestPermission();
+      return;
+    }
+    setRecError(null);
+    setMonitoring(true);
+  }, [cameraPermission, endSession, monitoring]);
 
   useEffect(() => cancelPostRoll, [cancelPostRoll]);
 
@@ -472,7 +487,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (monitoring) {
       startForegroundService();
-      return;
+      // The service starts on its own stack, so a refusal cannot come back as a
+      // thrown error here. Read it back a moment later and say so, rather than
+      // leaving surveillance looking active while Android has shut it down.
+      const check = setTimeout(() => {
+        const reason = foregroundServiceError();
+        if (reason) setRecError(`Surveillance en arrière-plan refusée : ${reason}`);
+      }, 1200);
+      return () => clearTimeout(check);
     }
     stopForegroundService();
     // A "person detected" alert left standing after surveillance is off says
@@ -571,6 +593,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const toggleNotifDet = useCallback(() => patchSettings({ notifDet: !settings.notifDet }), [patchSettings, settings.notifDet]);
   const openAlertSoundSettings = useCallback(() => openDetectionChannelSettings(), []);
 
+  const reportCameraProblem = useCallback((message: string | null) => {
+    // Only clears what it set: a camera that recovers must not wipe an unrelated
+    // recording or foreground-service message.
+    setRecError(prev => (message ?? (prev && /^(Caméra|Modèle)/.test(prev) ? null : prev)));
+  }, []);
+
   const setSensitivity = useCallback((s: Sensitivity) => patchSettings({ sens: s }), [patchSettings]);
   const setThreshold = useCallback((v: number) => patchSettings({ threshold: v }), [patchSettings]);
   const setRetention = useCallback((r: Retention) => patchSettings({ retention: r }), [patchSettings]);
@@ -601,7 +629,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     hydrated,
     tab, setTab,
     monitoring, det, conf, box, tracks, primaryTrackId, frameAspect, recSec, clock, detToday, lastDet,
-    recording: isRecording, recError, storage: store, cameraRef,
+    recording: isRecording, recError, storage: store, cameraRef, reportCameraProblem,
     toggleMonitoring, reportDetections,
     events, filter, setFilter, period, setPeriod, periodOpen, togglePeriodOpen, selected, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete,
@@ -613,7 +641,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     onb, perms, onbNext, onbFinish, grantPermission,
   }), [
     hydrated, tab, monitoring, det, conf, box, tracks, primaryTrackId, frameAspect, recSec, clock, detToday, lastDet,
-    isRecording, recError, store, toggleMonitoring, reportDetections,
+    isRecording, recError, store, cameraRef, reportCameraProblem, toggleMonitoring, reportDetections,
     events, filter, period, periodOpen, togglePeriodOpen, selected, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete, confirmWipe, askWipe, cancelWipe, doWipe,
     settings, toggleSection, cycleCamera, toggleResumeOnLaunch, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom,
