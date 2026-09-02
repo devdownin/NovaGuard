@@ -171,20 +171,41 @@ export function confirmedTracks(tracks: Track[]): Track[] {
  * is fixed at creation and `updateTracks` only matches within a kind, so an
  * equal id already implies an equal kind.
  */
+function sameTrack(x: Track, y: Track): boolean {
+  return (
+    x.id === y.id &&
+    Math.round(x.confidence * 100) === Math.round(y.confidence * 100) &&
+    x.box.x === y.box.x && x.box.y === y.box.y &&
+    x.box.width === y.box.width && x.box.height === y.box.height
+  );
+}
+
 export function sameVisibleTracks(a: Track[], b: Track[]): boolean {
   if (a === b) return true;
   if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    const x = a[i];
-    const y = b[i];
-    if (
-      x.id !== y.id ||
-      Math.round(x.confidence * 100) !== Math.round(y.confidence * 100) ||
-      x.box.x !== y.box.x || x.box.y !== y.box.y ||
-      x.box.width !== y.box.width || x.box.height !== y.box.height
-    ) return false;
-  }
+  for (let i = 0; i < a.length; i++) if (!sameTrack(a[i], b[i])) return false;
   return true;
+}
+
+/**
+ * The confirmed tracks, reusing `previous` when the overlay would not change.
+ *
+ * `confirmedTracks(next)` allocated a filtered array on every analysed frame
+ * only for the comparison to throw it away again — which is the garbage the
+ * identity check was added to remove, moved one level down. This walks `next`
+ * once and allocates nothing at all unless something actually moved, so an
+ * empty scene or a motionless subject costs a single pass and no array.
+ */
+export function confirmedTracksIfChanged(previous: Track[], tracks: Track[]): Track[] {
+  let seen = 0;
+  for (const track of tracks) {
+    if (!track.confirmed) continue;
+    const before = previous[seen];
+    if (before === undefined || !sameTrack(before, track)) return confirmedTracks(tracks);
+    seen++;
+  }
+  // A track that left is a change too, even though every survivor matched.
+  return seen === previous.length ? previous : confirmedTracks(tracks);
 }
 
 /**

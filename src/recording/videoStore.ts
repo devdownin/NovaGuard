@@ -1,7 +1,7 @@
 import {
   DocumentDirectoryPath, exists, getFSInfo, mkdir, moveFile, readDir, stat, unlink,
 } from '@dr.pogodin/react-native-fs';
-import { StorageInfo } from '../state/types';
+import { VolumeSpace } from '../state/types';
 
 /**
  * Every filesystem effect the recording feature needs, in one place.
@@ -112,15 +112,23 @@ export async function orphanedRecordings(knownPaths: (string | null)[]): Promise
   return onDisk.filter(p => !known.has(p));
 }
 
-export async function storageInfo(usedByEvents: number): Promise<StorageInfo> {
+/**
+ * Free and total bytes on the volume holding the clips.
+ *
+ * Deliberately knows nothing about events. It used to take the bytes they
+ * occupy and fold them in as `used`, which married a pure derivation to a
+ * native round trip: recomputing `used` after a detection meant calling
+ * `getFSInfo` too, several times a minute for a number that only moves as
+ * clips are written. The caller now derives `used` itself, for free.
+ */
+export async function volumeSpace(): Promise<VolumeSpace> {
   try {
     const info = await getFSInfo();
     return {
-      used: usedByEvents,
       free: Number(info.freeSpace) || 0,
       total: Number(info.totalSpace) || 0,
     };
   } catch {
-    return { used: usedByEvents, free: 0, total: 0 };
+    return { free: 0, total: 0 };
   }
 }
