@@ -6,7 +6,7 @@ import { Camera as CameraModule, useCameraPermission, useMicrophonePermission } 
 import {
   Camera, DetectionEvent, DetectionKind, ExpandedSections, HistoryFilter, InfoPanel,
   MaxDuration, OnboardingStep, Period, Permissions, PostRoll, Quality,
-  Retention, Sensitivity, Settings, StorageInfo, Tab,
+  Retention, Sensitivity, Settings, StorageInfo, Tab, VolumeSpace,
 } from './types';
 import {
   defaultDetToday, defaultEvents, defaultLastDet, defaultSettings,
@@ -15,14 +15,14 @@ import { dropStaleKeys, storage } from './storage';
 import { pad } from '../utils/date';
 import { useLatest } from '../utils/useLatest';
 import { FrameDetection } from '../ml/types';
-import { confirmedTracks, primaryTrack, sameVisibleTracks, Track, updateTracks } from '../ml/tracker';
+import { confirmedTracksIfChanged, primaryTrack, Track, updateTracks } from '../ml/tracker';
 import { Clip, useRecorder } from '../recording/useRecorder';
 import {
   bytesToReclaim, clipFileName, clipOutcome, eventsToReclaim, expiredEvents, MIN_FREE_BYTES,
   nextEventId, periodRange, postRollMs, sameDay, todayCount, totalBytes,
 } from '../recording/library';
 import {
-  deleteFile, deleteFiles, orphanedRecordings, renameRecording, storageInfo,
+  deleteFile, deleteFiles, orphanedRecordings, renameRecording, volumeSpace,
 } from '../recording/videoStore';
 import {
   dismissDetectionAlert, foregroundServiceError, hasNotificationPermission, notifyDetection,
@@ -134,8 +134,56 @@ export interface ViewfinderState {
   recSec: number;
 }
 
+/** The setters `reportDetections` drives, handed up by `ViewfinderProvider`. */
+interface ViewfinderSink {
+  setTracks: (update: (previous: Track[]) => Track[]) => void;
+  setPrimaryTrackId: (id: number | null) => void;
+  setFrameAspect: (aspect: number) => void;
+  setRecSec: (seconds: number) => void;
+}
+
 const AppStateCtx = createContext<AppStateValue | null>(null);
 const ViewfinderCtx = createContext<ViewfinderState | null>(null);
+
+/**
+ * Owns the state that changes at the frame-processor rate.
+ *
+ * Splitting the context stopped every *consumer* re-rendering on a frame, but
+ * the state itself still lived in `AppStateProvider`, so each detection
+ * re-executed that 700-line body — forty `useCallback` dependency arrays and a
+ * fifty-entry `useMemo` list, five times a second, to move one box. Holding it
+ * here means a frame re-renders these twenty lines instead, and the parent's
+ * `children` element is untouched so the app subtree below bails out.
+ */
+function ViewfinderProvider({
+  sink, children,
+}: { sink: React.RefObject<ViewfinderSink | null>; children: React.ReactNode }) {
+  const [tracks, setTracks] = useState<Track[]>([]);
+  const [primaryTrackId, setPrimaryTrackId] = useState<number | null>(null);
+  const [frameAspect, setFrameAspect] = useState(9 / 16);
+  const [recSec, setRecSec] = useState(0);
+
+  // `useState` setters are stable, so this is built once and the registration
+  // never re-runs. Effects flush child-first, but a frame cannot be processed
+  // before the camera below has mounted *and* the native session has delivered
+  // one asynchronously — well after this commit — so the sink is always live by
+  // the time `reportDetections` fires.
+  const setters = useMemo<ViewfinderSink>(
+    () => ({ setTracks, setPrimaryTrackId, setFrameAspect, setRecSec }),
+    [],
+  );
+  useEffect(() => {
+    sink.current = setters;
+    return () => { sink.current = null; };
+  }, [setters, sink]);
+
+  const value = useMemo<ViewfinderState>(
+    () => ({ tracks, primaryTrackId, frameAspect, recSec }),
+    [tracks, primaryTrackId, frameAspect, recSec],
+  );
+
+  return <ViewfinderCtx.Provider value={value}>{children}</ViewfinderCtx.Provider>;
+}
 
 function cycle<T>(options: readonly T[], current: T): T {
   const i = options.indexOf(current);
@@ -156,6 +204,17 @@ const QUALITY_OPTIONS: Quality[] = ['720p', '1080p', '4K'];
  */
 export const RESUME_ARM_MS = 8000;
 
+/**
+ * How often free space is re-measured, and auto-delete gets a chance to run.
+ *
+ * It used to ride the `events` array, so every detection cost a `getFSInfo`
+ * round trip — a night of surveillance meant hundreds of them for a number
+ * that only moves as clips are written. Reacting within half a minute is
+ * enough: `MIN_FREE_BYTES` already refuses to open a recording on a volume
+ * that is nearly full, so the disk cannot quietly overrun between sweeps.
+ */
+export const DISK_SWEEP_MS = 30_000;
+
 // Sessions now follow the tracker: one opens when a subject is *confirmed*
 // (seen on consecutive frames) and closes when every track has been dropped,
 // which is what stops a single lucky frame from writing a history event and
@@ -168,14 +227,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   const [monitoring, setMonitoring] = useState(false);
   const [det, setDet] = useState<DetectionKind | null>(null);
-  const [tracks, setTracks] = useState<Track[]>([]);
-  const [primaryTrackId, setPrimaryTrackId] = useState<number | null>(null);
-  const [frameAspect, setFrameAspect] = useState(9 / 16);
-  const [recSec, setRecSec] = useState(0);
+  // Frame-rate state lives in `ViewfinderProvider` below; the provider reaches
+  // its setters through this sink, so a detection never re-renders this body.
+  const viewfinder = useRef<ViewfinderSink | null>(null);
   const [detToday, setDetToday] = useState(defaultDetToday);
   const [lastDet, setLastDet] = useState(defaultLastDet);
   const [recError, setRecError] = useState<string | null>(null);
-  const [store, setStore] = useState<StorageInfo>({ used: 0, free: 0, total: 0 });
+  const [volume, setVolume] = useState<VolumeSpace>({ free: 0, total: 0 });
 
   const [events, setEvents] = useState<DetectionEvent[]>(defaultEvents);
   const [filter, setFilter] = useState<HistoryFilter>('Toutes');
@@ -353,7 +411,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const clearSession = useCallback(() => {
     sessionKindRef.current = null;
     setDet(null);
-    setRecSec(0);
+    viewfinder.current?.setRecSec(0);
   }, []);
 
   const sessionMeta = useCallback(() => ({
@@ -418,8 +476,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const { isRecording, start: startRecording, stop: stopRecording } = recorder;
 
   // Same reason: everything `reportDetections` reads that changes while it runs
-  // goes through a ref, so its identity — and the worklet's — survives.
-  const freeSpaceRef = useLatest(store.free);
+  // goes through a ref, so its identity — and the worklet's — survives. Free
+  // space comes from the measurement, not from `store`, which folds in a value
+  // derived from `events` that this path has no use for.
+  const freeSpaceRef = useLatest(volume.free);
   const settingsRef = useLatest(settings);
 
   const cancelPostRoll = useCallback(() => {
@@ -445,17 +505,16 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   }, [cancelPostRoll, clearSession, commitEvent, sessionMeta, stopRecording]);
 
   const reportDetections = useCallback((detections: FrameDetection[], aspect: number) => {
-    setFrameAspect(aspect);
+    viewfinder.current?.setFrameAspect(aspect);
 
     const next = updateTracks(tracksRef.current, detections, Date.now());
     tracksRef.current = next;
     // Keep the previous array when nothing moved: every other setter here
     // already bails on `Object.is`, so this is what makes a still scene free.
-    const visible = confirmedTracks(next);
-    setTracks(prev => (sameVisibleTracks(prev, visible) ? prev : visible));
+    viewfinder.current?.setTracks(prev => confirmedTracksIfChanged(prev, next));
 
     const primary = primaryTrack(next);
-    setPrimaryTrackId(primary ? primary.id : null);
+    viewfinder.current?.setPrimaryTrackId(primary ? primary.id : null);
 
     if (primary) {
       cancelPostRoll();
@@ -463,7 +522,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         sessionKindRef.current = primary.kind;
         sessionStartRef.current = Date.now();
         sessionMaxConfRef.current = primary.maxConfidence;
-        setRecSec(0);
+        viewfinder.current?.setRecSec(0);
         // Refuse to start on a nearly full volume rather than letting the
         // encoder fail mid-clip and lose the whole passage.
         const free = freeSpaceRef.current;
@@ -485,7 +544,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         }
       } else {
         sessionMaxConfRef.current = Math.max(sessionMaxConfRef.current, primary.maxConfidence);
-        setRecSec(Math.floor((Date.now() - sessionStartRef.current) / 1000));
+        viewfinder.current?.setRecSec(Math.floor((Date.now() - sessionStartRef.current) / 1000));
       }
       setDet(primary.kind);
       return;
@@ -508,7 +567,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     if (monitoring) {
       endSession();
       tracksRef.current = [];
-      setTracks([]);
+      viewfinder.current?.setTracks(() => []);
       setMonitoring(false);
       return;
     }
@@ -559,41 +618,56 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   // gone would be worse than not showing one at all.
   useEffect(() => stopForegroundService, []);
 
-  // ── retention & disk pressure ────────────────────────────────────────
-  // Runs whenever the library changes: drops clips past the retention window,
-  // then — if auto-delete is on and the volume is nearly full — the oldest
-  // clips until there is room again. Both prune `events`, which re-runs this
-  // effect until there is nothing left to drop.
+  // ── retention ────────────────────────────────────────────────────────
+  // Rides the library, because deciding what has expired is pure arithmetic.
+  // Pruning `events` re-runs this until there is nothing left to drop.
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated) return undefined;
+    const expired = expiredEvents(events, settings.retention, Date.now());
+    if (!expired.length) return undefined;
+
     let cancelled = false;
-
-    (async () => {
-      const expired = expiredEvents(events, settings.retention, Date.now());
-      if (expired.length) {
-        const ids = new Set(expired.map(e => e.id));
-        await deleteFiles(expired.map(e => e.path));
-        if (!cancelled) setEvents(evs => evs.filter(e => !ids.has(e.id)));
-        return;
-      }
-
-      const disk = await storageInfo(totalBytes(events));
-      if (cancelled) return;
-      setStore(disk);
-
-      if (!settings.autoDel || disk.free <= 0) return;
-      const needed = bytesToReclaim(disk.free);
-      if (needed <= 0) return;
-
-      const victims = eventsToReclaim(events, needed);
-      if (!victims.length) return;
-      const ids = new Set(victims.map(e => e.id));
-      await deleteFiles(victims.map(e => e.path));
+    const ids = new Set(expired.map(e => e.id));
+    deleteFiles(expired.map(e => e.path)).then(() => {
       if (!cancelled) setEvents(evs => evs.filter(e => !ids.has(e.id)));
-    })();
-
+    });
     return () => { cancelled = true; };
-  }, [hydrated, events, settings.retention, settings.autoDel]);
+  }, [hydrated, events, settings.retention]);
+
+  // ── disk pressure ────────────────────────────────────────────────────
+  // On its own cadence rather than the library's: measuring costs a native
+  // call, and reclaiming is not something a single new clip can make urgent.
+  const eventsRef = useLatest(events);
+  const sweepDisk = useCallback(async () => {
+    const space = await volumeSpace();
+    setVolume(space);
+
+    if (!settingsRef.current.autoDel || space.free <= 0) return;
+    const needed = bytesToReclaim(space.free);
+    if (needed <= 0) return;
+
+    const victims = eventsToReclaim(eventsRef.current, needed);
+    if (!victims.length) return;
+    const ids = new Set(victims.map(e => e.id));
+    await deleteFiles(victims.map(e => e.path));
+    setEvents(evs => evs.filter(e => !ids.has(e.id)));
+    // Re-measure rather than assume: the next sweep must decide against what
+    // the volume actually reports, or it would keep reclaiming against a
+    // free-space figure the deletions have already made stale.
+    setVolume(await volumeSpace());
+  }, [eventsRef, settingsRef]);
+
+  useEffect(() => {
+    if (!hydrated) return undefined;
+    sweepDisk();
+    const iv = setInterval(sweepDisk, DISK_SWEEP_MS);
+    return () => clearInterval(iv);
+  }, [hydrated, sweepDisk]);
+
+  const store = useMemo<StorageInfo>(
+    () => ({ ...volume, used: totalBytes(events) }),
+    [events, volume],
+  );
 
   // ── history ──────────────────────────────────────────────────────────
   const togglePeriodOpen = useCallback(() => setPeriodOpen(v => !v), []);
@@ -610,15 +684,16 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     setEvents(evs => evs.filter(e => e.id !== selected));
     setSelected(null);
     setConfirmDelete(false);
-  }, [selected, selectedEvent]);
+    sweepDisk();
+  }, [selected, selectedEvent, sweepDisk]);
 
   const askWipe = useCallback(() => setConfirmWipe(true), []);
   const cancelWipe = useCallback(() => setConfirmWipe(false), []);
   const doWipe = useCallback(() => {
-    deleteFiles(events.map(e => e.path));
+    deleteFiles(events.map(e => e.path)).then(sweepDisk);
     setEvents([]);
     setConfirmWipe(false);
-  }, [events]);
+  }, [events, sweepDisk]);
   const wipeAllVideos = askWipe;
 
   // ── setup ────────────────────────────────────────────────────────────
@@ -705,14 +780,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     info, openInfo, closeInfo, onb, perms, onbNext, onbFinish, grantPermission,
   ]);
 
-  const viewfinderValue = useMemo<ViewfinderState>(
-    () => ({ tracks, primaryTrackId, frameAspect, recSec }),
-    [tracks, primaryTrackId, frameAspect, recSec],
-  );
-
   return (
     <AppStateCtx.Provider value={value}>
-      <ViewfinderCtx.Provider value={viewfinderValue}>{children}</ViewfinderCtx.Provider>
+      <ViewfinderProvider sink={viewfinder}>{children}</ViewfinderProvider>
     </AppStateCtx.Provider>
   );
 }
