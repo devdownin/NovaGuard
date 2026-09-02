@@ -30,6 +30,9 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et ce p
 - Détection de visages (ML Kit via `react-native-vision-camera-face-detector`) et zoom automatique cinématique : gros plan progressif sur le visage, maintien 4 s, puis retour sur la ou les personnes en entier. Réglage « Zoom auto sur les visages » dans Setup → Détection.
 - Tests unitaires de la géométrie de cadrage (`__tests__/framing.test.ts`), du redressement et du mapping « cover » (`__tests__/orientation.test.ts`) et du suivi des sujets (`__tests__/tracker.test.ts`).
 
+### Sécurité
+- Correction de 7 vulnérabilités modérées (`npm audit` : 7 → 0) : `fast-xml-parser < 5.7.0` ([GHSA-gh4j-gqv2-49f6](https://github.com/advisories/GHSA-gh4j-gqv2-49f6), injection XML/CDATA), atteint via `@react-native-community/cli-*` ≤ 20.1.1.
+
 ### Modifié
 - **Plancher relevé à Android 16 (API 36)** : `minSdkVersion` passe de 24 à 36, au niveau de `compileSdk` et `targetSdk`. L'application est donc construite, livrée et testée contre un seul niveau de plateforme.
 - **ABI 32 bits retirées** : `reactNativeArchitectures` passe de `armeabi-v7a,arm64-v8a,x86,x86_64` à `arm64-v8a,x86_64`. Avec un plancher Android 16, aucun appareil capable d'installer l'application n'est en 32 bits, et il n'existe pas d'image d'émulateur x86 32 bits à ce niveau d'API : ces bibliothèques natives n'auraient jamais été chargées.

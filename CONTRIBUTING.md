@@ -35,6 +35,24 @@ npm test             # Jest
 
 Ces trois vérifications tournent aussi automatiquement en CI (GitHub Actions) sur chaque pull request — voir [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
+## Dépendances : ce qui est volontairement figé
+
+Plusieurs dépendances ne sont **pas** à leur dernière version majeure, et c'est délibéré. Merci de ne pas les bumper sans traiter le point correspondant — `npm outdated` les signalera, ce n'est pas un oubli.
+
+| Dépendance | Version | Dernière | Pourquoi on reste |
+| --- | --- | --- | --- |
+| `react-native-vision-camera` | 4.7.x | 5.x | La v5 est une réécriture sur [Nitro Modules](https://nitro.margelo.com) : `useFrameProcessor` et `useCameraFormat` n'existent plus, les frame processors passent par `react-native-vision-camera-worklets` au lieu de `react-native-worklets-core`. `src/components/CameraFeed.tsx` est à réécrire entièrement. |
+| `vision-camera-resize-plugin` | 3.2.0 | 3.2.0 (à jour) | **C'est le vrai verrou.** Dernière publication en décembre 2024, `peerDependencies` toujours sur `react-native-vision-camera >=4.0.1` + `react-native-worklets-core`. Aucune version compatible Nitro. Tant qu'il n'en existe pas, passer VisionCamera en v5 casse le redimensionnement des frames — donc l'inférence. |
+| `react-native-fast-tflite` | 1.6.x | 3.x | La v3 exige `react-native-nitro-modules` ; à migrer en même temps que VisionCamera, pas avant. |
+| `react-native-vision-camera-face-detector` | 1.10.x | 2.x | La v2 exige `react-native-vision-camera >= 5.0`. Même blocage. |
+| `eslint` | 8.x | 10.x | `@react-native/eslint-config` ne déclare `eslint` qu'en `^8 || ^9`, y compris dans sa version 0.87.1. La v10 n'est supportée par aucune version de React Native. |
+| `typescript` | 5.9.x | 7.x | Vérifié : `tsc --noEmit` et les tests passent en TS 7, mais `npm run lint` **échoue**. Le paquet `typescript` 7 n'expose plus l'API historique du compilateur (`createProgram`, `ScriptKind`, `TypeFlags` sont `undefined`), et `@typescript-eslint` 7 — tiré par `@react-native/eslint-config` — plante au chargement (`Cannot read properties of undefined (reading 'Intrinsic')`). |
+| `@babel/*` | 7.x | 8.x | `@babel/plugin-proposal-optional-chaining` et `@babel/plugin-proposal-nullish-coalescing-operator` ont été supprimés dans Babel 8 (figés en 7.21.0 / 7.18.6). `react-native-worklets-core` les réclame encore par ces noms dépréciés lors de sa retransformation interne : sans eux, le bundle Metro de production ne se construit pas. |
+| `react` | 19.1.0 | 19.2.x | Version alignée sur celle avec laquelle React Native 0.81 est validé. À bumper avec React Native, pas séparément. |
+| `react-native` | 0.81.4 | 0.87.1 | Mise à niveau réelle (fichiers natifs `android/`, Gradle, template) impossible à valider sans build Android. Exige aussi Node `^22.13 || ^24.3 || >=26` et React `^19.2.3`. |
+
+En clair : **tout le bloc caméra + ML se met à jour d'un seul tenant ou pas du tout**, et il attend une version Nitro de `vision-camera-resize-plugin` (ou son remplacement par une autre méthode de redimensionnement, par exemple `react-native-nitro-image`).
+
 ## Style de code
 
 - TypeScript strict, pas de `any` sauf nécessité justifiée.
