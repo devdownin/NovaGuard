@@ -33,8 +33,13 @@ export function OnboardingModal() {
     key: keyof Permissions; label: string; note: string; enabled: boolean;
   }[] = [
     { key: 'cam', label: 'Caméra', note: 'Indispensable à la surveillance', enabled: true },
+    // Both optional permissions unlock together, on the camera. Chaining
+    // notifications behind the microphone contradicted the line right above
+    // them — refusing the mic, which this screen invites, left the alerts of a
+    // surveillance app permanently out of reach, and nothing else in the app
+    // asks for them.
     { key: 'mic', label: 'Microphone', note: 'Son des enregistrements', enabled: perms.cam },
-    { key: 'notif', label: 'Notifications', note: "Alerte lors d'une détection", enabled: perms.mic },
+    { key: 'notif', label: 'Notifications', note: "Alerte lors d'une détection", enabled: perms.cam },
   ];
 
   const blocked = !perms.cam;
@@ -92,6 +97,7 @@ export function OnboardingModal() {
                         <Text style={styles.permNote}>{row.note}</Text>
                       </View>
                       <Pressable
+                        testID={`onb-${row.key}`}
                         onPress={() => grantPermission(row.key)}
                         disabled={disabled}
                         style={[

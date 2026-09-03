@@ -104,19 +104,33 @@ describe('notification permission', () => {
     jest.spyOn(PermissionsAndroid, 'request').mockResolvedValue(
       PermissionsAndroid.RESULTS.GRANTED,
     );
-    await expect(load().requestNotificationPermission()).resolves.toBe(true);
+    await expect(load().requestNotificationPermission()).resolves.toBe('granted');
   });
 
   it('is not granted when the user refuses', async () => {
     jest.spyOn(PermissionsAndroid, 'request').mockResolvedValue(
       PermissionsAndroid.RESULTS.DENIED,
     );
-    await expect(load().requestNotificationPermission()).resolves.toBe(false);
+    await expect(load().requestNotificationPermission()).resolves.toBe('denied');
+  });
+
+  /**
+   * The case a boolean hid. Android shows no dialog once this is the answer, so
+   * the request resolves having displayed nothing: a caller that read it as an
+   * ordinary refusal could only offer a button that appears to do nothing.
+   */
+  it('says so when Android will not ask again, rather than calling it a refusal', async () => {
+    jest.spyOn(PermissionsAndroid, 'request').mockResolvedValue(
+      PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN,
+    );
+    await expect(load().requestNotificationPermission()).resolves.toBe('blocked');
   });
 
   it('treats a thrown request as refused', async () => {
     jest.spyOn(PermissionsAndroid, 'request').mockRejectedValue(new Error('no such permission'));
-    await expect(load().requestNotificationPermission()).resolves.toBe(false);
+    // 'denied', not 'blocked': a throw says nothing about whether Android would
+    // have asked, and sending the user to settings on a guess is worse.
+    await expect(load().requestNotificationPermission()).resolves.toBe('denied');
   });
 
   it('checks the current grant without prompting', async () => {

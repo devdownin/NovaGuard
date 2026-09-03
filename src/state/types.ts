@@ -60,6 +60,16 @@ export interface ExpandedSections {
   about: boolean;
 }
 
+/**
+ * What came of asking for a permission.
+ *
+ * `blocked` is the case a boolean hides: Android stops showing the dialog once
+ * the user has refused for good, so the request resolves without anything
+ * appearing on screen. A caller that cannot tell it from an ordinary refusal
+ * can only offer a button that silently does nothing.
+ */
+export type PermissionOutcome = 'granted' | 'denied' | 'blocked';
+
 /** All three are real OS permissions, re-read live and never persisted. */
 export interface Permissions {
   cam: boolean;

@@ -11,6 +11,8 @@
  */
 // `requireActual`, not a re-export: a bare `export ... from` resolves straight
 // back through this mock and recurses.
+import { PermissionOutcome } from '../../state/types';
+
 const actual = jest.requireActual('../foregroundService');
 export const NOTIFICATION_TITLE: string = actual.NOTIFICATION_TITLE;
 export const NOTIFICATION_BODY: string = actual.NOTIFICATION_BODY;
@@ -22,5 +24,8 @@ export const isForegroundServiceRunning = jest.fn(() => false);
 export const notifyDetection = jest.fn();
 export const dismissDetectionAlert = jest.fn();
 export const openDetectionChannelSettings = jest.fn();
-export const requestNotificationPermission = jest.fn(async () => false);
+export const requestNotificationPermission = jest.fn<Promise<PermissionOutcome>, []>(
+  async () => 'denied',
+);
+export const openAppSettings = jest.fn();
 export const hasNotificationPermission = jest.fn(async () => false);

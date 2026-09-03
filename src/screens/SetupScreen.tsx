@@ -6,6 +6,7 @@ import { color, font, radius } from '../theme';
 import { useAppState } from '../state/AppStateContext';
 import { Retention, Sensitivity } from '../state/types';
 import { formatBytes } from '../recording/library';
+import { describeClipGap, formatClipGap } from '../recording/clipGap';
 import { APP_LICENSE, APP_VERSION, ISSUES_URL, REPO_URL } from '../constants/app';
 import { CollapsibleSection } from '../components/CollapsibleSection';
 import { SettingRow, StaticValue, ValueButton } from '../components/SetupRows';
@@ -33,7 +34,7 @@ const SENS_HINT: Record<Sensitivity, string> = {
 
 export function SetupScreen() {
   const s = useAppState();
-  const { settings, events, storage: store } = s;
+  const { settings, events, storage: store, clipGap } = s;
 
   // Share of the whole volume taken by NovaGuard's own clips. Kept visible at a
   // sliver once anything is stored, so the bar never reads as "nothing on disk".
@@ -199,6 +200,11 @@ export function SetupScreen() {
           </SettingRow>
           <SettingRow label="Licence" subtitle="Logiciel libre et open source">
             <StaticValue label={APP_LICENSE} />
+          </SettingRow>
+          {/* Only a real device can answer this, so the app measures itself
+              rather than shipping a figure nobody took. */}
+          <SettingRow label="Coupure entre deux clips" subtitle={describeClipGap(clipGap)}>
+            <StaticValue label={formatClipGap(clipGap)} />
           </SettingRow>
           <View style={[styles.subBlock, { flexDirection: 'row', gap: 7 }]}>
             <PrimaryOutlineButton label="Code source" onPress={() => Linking.openURL(REPO_URL)} style={{ flex: 1 }} />
