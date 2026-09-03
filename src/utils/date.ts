@@ -7,9 +7,22 @@ export function pad(n: number): string {
   return n < 10 ? '0' + n : '' + n;
 }
 
-function startOfDay(ts: number): number {
+export function startOfDay(ts: number): number {
   const d = new Date(ts);
   d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/**
+ * Midnight `days` calendar days before the day `ts` falls in.
+ *
+ * Walks days with `setDate` rather than subtracting 86 400 000 ms: across a
+ * daylight-saving change the ms form lands an hour off, which drags the wrong
+ * evening's clips into a retention sweep or a history filter.
+ */
+export function startOfDayBefore(ts: number, days: number): number {
+  const d = new Date(startOfDay(ts));
+  d.setDate(d.getDate() - days);
   return d.getTime();
 }
 

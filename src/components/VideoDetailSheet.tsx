@@ -11,8 +11,7 @@ import { PlayIcon } from './icons';
 import { SecondaryOutlineButton, TextButton } from './OutlineButton';
 
 export function VideoDetailSheet() {
-  const { events, selected, selectEvent, askDelete } = useAppState();
-  const event = events.find(e => e.id === selected) ?? null;
+  const { selected, selectedEvent: event, selectEvent, askDelete } = useAppState();
   const [playing, setPlaying] = useState(false);
 
   // Never carry playback over from the previously opened event.

@@ -33,13 +33,17 @@ export interface DetectionEvent {
   bytes: number;
 }
 
-export interface StorageInfo {
-  /** Bytes taken by NovaGuard's own clips. */
-  used: number;
-  /** Bytes free on the volume holding them. */
+/** What the volume itself reports. Measured; nothing here is derived. */
+export interface VolumeSpace {
+  /** Bytes free on the volume holding the clips. */
   free: number;
   /** Total volume size, for the usage bar. */
   total: number;
+}
+
+export interface StorageInfo extends VolumeSpace {
+  /** Bytes taken by NovaGuard's own clips, summed from the events. */
+  used: number;
 }
 
 export interface ExpandedSections {

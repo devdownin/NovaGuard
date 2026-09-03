@@ -1,7 +1,7 @@
 import {
   DocumentDirectoryPath, exists, getFSInfo, mkdir, moveFile, readDir, stat, unlink,
 } from '@dr.pogodin/react-native-fs';
-import { StorageInfo } from '../state/types';
+import { VolumeSpace } from '../state/types';
 
 /**
  * Every filesystem effect the recording feature needs, in one place.
@@ -37,32 +37,56 @@ export async function fileSize(path: string): Promise<number> {
  * otherwise do.
  */
 export async function renameRecording(from: string, filename: string): Promise<string> {
-  const to = `${RECORDINGS_DIR}/${filename}`;
-  if (to === from) return from;
+  if (`${RECORDINGS_DIR}/${filename}` === from) return from;
   try {
-    if (await exists(to)) {
-      const unique = filename.replace(/\.mp4$/, `_${Date.now() % 1000}.mp4`);
-      await moveFile(from, `${RECORDINGS_DIR}/${unique}`);
-      return `${RECORDINGS_DIR}/${unique}`;
-    }
-    await moveFile(from, to);
-    return to;
+    // Walk suffixes until one is free. The previous `_${Date.now() % 1000}`
+    // suffix was itself collision-prone: two clips renamed in the same
+    // millisecond produced the same name, and `moveFile` overwrites — so the
+    // first clip was destroyed while its event went on pointing at the path.
+    const target = await freeName(filename);
+    await moveFile(from, target);
+    return target;
   } catch {
     return from;
   }
 }
 
+/** First unused path for `filename`. Throws if every candidate is taken. */
+async function freeName(filename: string): Promise<string> {
+  const base = filename.replace(/\.mp4$/, '');
+  for (let n = 0; n < 100; n++) {
+    const candidate = `${RECORDINGS_DIR}/${n === 0 ? base : `${base}_${n}`}.mp4`;
+    if (!(await exists(candidate))) return candidate;
+  }
+  // Deliberately no timestamp-suffixed escape hatch: that is the scheme that
+  // overwrote clips in the first place. `renameRecording` catches this and
+  // keeps the clip under the name it already has, which never loses a file.
+  throw new Error(`No free name for ${filename}`);
+}
+
 export async function deleteFile(path: string | null): Promise<void> {
   if (!path) return;
   try {
-    if (await exists(path)) await unlink(path);
+    // No `exists` probe first: `unlink` rejects on a missing file, and a clip
+    // that is already gone is the state we wanted anyway. The probe doubled the
+    // bridge traffic of every wipe for nothing.
+    await unlink(path);
   } catch {
-    // A clip that is already gone is the state we wanted anyway.
+    // Already gone, or the volume is unreachable — nothing better to do either way.
   }
 }
 
+/**
+ * Bound on concurrent unlinks. `Promise.all` over the whole list fired one
+ * native call per clip in a single tick — "tout supprimer" on a long history
+ * stalls the JS thread and can exhaust the FS module's thread pool mid-wipe.
+ */
+export const DELETE_CONCURRENCY = 8;
+
 export async function deleteFiles(paths: (string | null)[]): Promise<void> {
-  await Promise.all(paths.map(deleteFile));
+  for (let i = 0; i < paths.length; i += DELETE_CONCURRENCY) {
+    await Promise.all(paths.slice(i, i + DELETE_CONCURRENCY).map(deleteFile));
+  }
 }
 
 /** Absolute paths of every clip currently on disk. */
@@ -88,15 +112,23 @@ export async function orphanedRecordings(knownPaths: (string | null)[]): Promise
   return onDisk.filter(p => !known.has(p));
 }
 
-export async function storageInfo(usedByEvents: number): Promise<StorageInfo> {
+/**
+ * Free and total bytes on the volume holding the clips.
+ *
+ * Deliberately knows nothing about events. It used to take the bytes they
+ * occupy and fold them in as `used`, which married a pure derivation to a
+ * native round trip: recomputing `used` after a detection meant calling
+ * `getFSInfo` too, several times a minute for a number that only moves as
+ * clips are written. The caller now derives `used` itself, for free.
+ */
+export async function volumeSpace(): Promise<VolumeSpace> {
   try {
     const info = await getFSInfo();
     return {
-      used: usedByEvents,
       free: Number(info.freeSpace) || 0,
       total: Number(info.totalSpace) || 0,
     };
   } catch {
-    return { used: usedByEvents, free: 0, total: 0 };
+    return { free: 0, total: 0 };
   }
 }

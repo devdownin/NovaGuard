@@ -3,7 +3,15 @@
  */
 
 import {
-  confirmedTracks, DEFAULT_TRACKER_OPTIONS, iou, primaryTrack, resetTrackIds, Track, updateTracks,
+  confirmedTracks,
+  confirmedTracksIfChanged,
+  DEFAULT_TRACKER_OPTIONS,
+  iou,
+  primaryTrack,
+  resetTrackIds,
+  sameVisibleTracks,
+  Track,
+  updateTracks,
 } from '../src/ml/tracker';
 import { FrameDetection } from '../src/ml/types';
 
@@ -178,5 +186,83 @@ describe('primaryTrack', () => {
     tracks = updateTracks(tracks, [], 1100 + DEFAULT_TRACKER_OPTIONS.dropAfterMs);
     expect(tracks).toHaveLength(0);
     expect(primaryTrack(tracks)).toBeNull();
+  });
+});
+
+describe('sameVisibleTracks', () => {
+  /** A track confirmed at `x`, as the overlay would receive it. */
+  const shown = (x: number, confidence = 0.9) => {
+    // Same id every time, so a comparison isolates the fields under test.
+    resetTrackIds();
+    const seen = [person(x, 0.3, confidence)];
+    return confirmedTracks(updateTracks(updateTracks([], seen, 1000), seen, 1100));
+  };
+
+  it('holds for an unchanged list, whatever the array identity', () => {
+    expect(sameVisibleTracks(shown(0.3), shown(0.3))).toBe(true);
+    expect(sameVisibleTracks([], [])).toBe(true);
+  });
+
+  it('breaks as soon as a box moves', () => {
+    expect(sameVisibleTracks(shown(0.3), shown(0.36))).toBe(false);
+  });
+
+  it('breaks when a subject joins or leaves', () => {
+    expect(sameVisibleTracks(shown(0.1), [])).toBe(false);
+  });
+
+  // The label shows a whole percent, so a raw-float wobble under it changes no
+  // pixel — treating it as a change would redraw the overlay on every frame a
+  // subject stands still.
+  it('ignores a confidence wobble too small to change the label', () => {
+    expect(sameVisibleTracks(shown(0.3, 0.9012), shown(0.3, 0.9034))).toBe(true);
+    expect(sameVisibleTracks(shown(0.3, 0.901), shown(0.3, 0.915))).toBe(false);
+  });
+});
+
+describe('confirmedTracksIfChanged', () => {
+  const confirm = (x: number, confidence = 0.9) => {
+    resetTrackIds();
+    const seen = [person(x, 0.3, confidence)];
+    return updateTracks(updateTracks([], seen, 1000), seen, 1100);
+  };
+
+  it('returns the very same array when nothing moved', () => {
+    const previous = confirmedTracks(confirm(0.3));
+    // Identity, not equality: a new array is a new context value downstream.
+    expect(confirmedTracksIfChanged(previous, confirm(0.3))).toBe(previous);
+  });
+
+  it('keeps an empty list empty without allocating a new one', () => {
+    const empty: Track[] = [];
+    expect(confirmedTracksIfChanged(empty, [])).toBe(empty);
+    expect(confirmedTracksIfChanged(empty, updateTracks([], [person(0.3)], 1000))).toBe(empty);
+  });
+
+  it('rebuilds when a box moves', () => {
+    const previous = confirmedTracks(confirm(0.3));
+    const after = confirmedTracksIfChanged(previous, confirm(0.36));
+    expect(after).not.toBe(previous);
+    expect(after[0].box.x).toBeCloseTo(0.36);
+  });
+
+  it('rebuilds when a subject leaves, even though every survivor matched', () => {
+    const previous = confirmedTracks(confirm(0.3));
+    expect(confirmedTracksIfChanged(previous, [])).toEqual([]);
+    expect(confirmedTracksIfChanged(previous, [])).not.toBe(previous);
+  });
+
+  it('rebuilds when a subject joins', () => {
+    resetTrackIds();
+    const two = [person(0.1), person(0.6)];
+    const tracks = updateTracks(updateTracks([], two, 1000), two, 1100);
+    const previous = confirmedTracks(confirm(0.1));
+    expect(confirmedTracksIfChanged(previous, tracks)).toHaveLength(2);
+  });
+
+  it('agrees with confirmedTracks whenever it rebuilds', () => {
+    const previous = confirmedTracks(confirm(0.3));
+    const tracks = confirm(0.36);
+    expect(confirmedTracksIfChanged(previous, tracks)).toEqual(confirmedTracks(tracks));
   });
 });
