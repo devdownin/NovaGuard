@@ -2,6 +2,7 @@
 # Keeping these out of the build context matters anyway: node_modules alone is
 # hundreds of megabytes to hand the daemon for nothing.
 node_modules
+.ci-cache
 android/build
 android/app/build
 android/.gradle
