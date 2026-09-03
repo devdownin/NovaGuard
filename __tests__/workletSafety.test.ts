@@ -261,6 +261,21 @@ describe('the compiled analysis worklet', () => {
     expect(compiled).not.toMatch(/\brunAsync\b/);
   });
 
+  it('does each native call once per frame', () => {
+    // Twice now, a merge has collided in this block and left a duplicated
+    // resize/inference stanza behind. The last one did not parse, so tsc caught
+    // it; one that does parse would double the per-frame cost of the two most
+    // expensive calls in the app and change nothing visible. Counting is what
+    // notices that.
+    const body = analysisWorkletSource();
+    const occurrences = (pattern: RegExp) => body.match(pattern)?.length ?? 0;
+
+    expect(occurrences(/resize\(frame/g)).toBe(1);
+    expect(occurrences(/model\.runSync\(/g)).toBe(1);
+    expect(occurrences(/detectFaces\(frame\)/g)).toBe(1);
+    expect(occurrences(/onJsFrame\(/g)).toBe(1);
+  });
+
   it('hands a frame it analysed to the JS thread', () => {
     const closure = closureFor();
     runAnalysis(closure);
