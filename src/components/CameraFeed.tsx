@@ -1,7 +1,7 @@
 import React, { RefObject, useEffect, useMemo } from 'react';
 import { StyleProp, ViewStyle } from 'react-native';
 import {
-  Camera, runAsync, runAtTargetFps, useCameraDevice, useCameraFormat, useFrameProcessor,
+  Camera, runAtTargetFps, useCameraDevice, useCameraFormat, useFrameProcessor,
 } from 'react-native-vision-camera';
 import { useResizePlugin } from 'vision-camera-resize-plugin';
 import { useFaceDetector } from 'react-native-vision-camera-face-detector';
@@ -13,6 +13,7 @@ import { uprightBoxToViewBox } from '../camera/framing';
 import { useDetectionModel } from '../camera/useDetectionModel';
 import { interpretDetections } from '../ml/interpretDetections';
 import { frameErrorMessage } from '../camera/frameErrors';
+import { FrameStage } from '../camera/frameTrace';
 import { qualityBitRate, qualityResolution } from '../recording/library';
 import { DetectionBox, FrameDetection } from '../ml/types';
 
@@ -44,6 +45,11 @@ interface CameraFeedProps {
   cameraRef?: RefObject<Camera | null>;
   /** Camera and model failures, which are otherwise completely silent. */
   onProblem?: (message: string | null) => void;
+  /**
+   * Called before each native call the analysis makes, so a crash that takes
+   * the process down still says which one it was in. See `frameTrace.ts`.
+   */
+  onStage?: (stage: FrameStage) => void;
 }
 
 /**
@@ -54,7 +60,7 @@ interface CameraFeedProps {
  * (Viewfinder) falls back to the decorative standby view in that case.
  */
 export function CameraFeed({
-  style, active, viewWidth, viewHeight, onFrame, cameraRef, onProblem,
+  style, active, viewWidth, viewHeight, onFrame, cameraRef, onProblem, onStage,
 }: CameraFeedProps) {
   const { perms, settings, reportDetections } = useAppState();
 
@@ -84,6 +90,18 @@ export function CameraFeed({
     if (!onProblem) return;
     onProblem(modelFailed ? 'Modèle de détection impossible à charger' : null);
   }, [modelFailed, onProblem]);
+
+  // Recorded as soon as the camera is asked to open, because opening it is
+  // itself native work: CameraX configures a session and binds an ImageAnalysis
+  // use case, and a device that dies there never reaches the frame processor at
+  // all. Without this, the trace such a launch leaves is empty — indistinguishable
+  // from a launch that never started surveillance.
+  useEffect(() => {
+    // Gated on the same condition the render is: with no permission or no
+    // device this component draws nothing, and blaming a camera that was never
+    // opened would send the reader after the wrong failure.
+    if (active && perms.cam && device != null) onStage?.('camera');
+  }, [active, device, onStage, perms.cam]);
 
   // `autoMode` asks the plugin to scale and rotate face bounds natively against
   // the window size we hand it — passing the viewfinder's own size means bounds
@@ -139,6 +157,18 @@ export function CameraFeed({
     onProblem?.(frameErrorMessage(message));
   }, [onProblem]);
 
+  // Deliberately unconditional, and deliberately not gated on a flag the
+  // worklet reads. A flag would have to be a captured value — which the
+  // compiler freezes at build time — or a shared value, whose `.value` the
+  // compiler hoists into a copy. Both would silently stop tracing. The cost of
+  // getting it wrong is a diagnostic that lies; the cost of always hopping is
+  // four cross-runtime calls per analysed frame, against a resize and an
+  // inference that each take milliseconds. The JS side stops recording as soon
+  // as one frame gets through (see `reportFrameStage`).
+  const onFrameStage = useRunOnJS((stage: FrameStage) => {
+    onStage?.(stage);
+  }, [onStage]);
+
   const targetFps = FPS_BY_SENSITIVITY[settings.sens];
   const detectPerson = settings.person;
   const detectAnimal = settings.animal;
@@ -151,6 +181,20 @@ export function CameraFeed({
     'worklet';
     if (model == null) return;
 
+    // Analysed on the thread CameraX delivers the frame on, not handed to
+    // `runAsync`. `runAsync` moves the work to a second worklet context and
+    // keeps the frame alive across threads, and that is where this app died:
+    // a SIGSEGV on `VisionCamera.video` a few frames after the preview
+    // appeared, with the ImageReader then running out of buffers because the
+    // frames it was holding were never closed. Upstream has the same crash
+    // open on the same thread (mrousavy/react-native-vision-camera#2589),
+    // release builds only.
+    //
+    // What it costs: the analysis blocks the analyser thread. That is what
+    // `runAtTargetFps` and CameraX's backpressure are for — the producer waits
+    // or the frame is dropped, which is exactly what looking five times a
+    // second already means. The preview is a separate use case and keeps its
+    // own frame rate.
     runAtTargetFps(targetFps, () => {
       'worklet';
       runAsync(frame, () => {
@@ -196,9 +240,17 @@ export function CameraFeed({
           const failure = e as { message?: string } | undefined;
           onFrameError(failure?.message ?? 'erreur inconnue');
         }
-      });
+
+        onFrameStage('report');
+        onJsFrame(detections, faces, uprightAspect(frame.width, frame.height, frame.orientation));
+      } catch (e) {
+        // Plain property access, no `instanceof`: the worklet runtime is not
+        // the one this value's prototype came from.
+        const failure = e as { message?: string } | undefined;
+        onFrameError(failure?.message ?? 'erreur inconnue');
+      }
     });
-  }, [model, resize, onJsFrame, onFrameError, detectFaces, autoZoom, viewW, viewH, targetFps, detectPerson, detectAnimal, minConfidence]);
+  }, [model, resize, onJsFrame, onFrameError, onFrameStage, detectFaces, autoZoom, viewW, viewH, targetFps, detectPerson, detectAnimal, minConfidence]);
 
   if (!perms.cam || device == null) return null;
 

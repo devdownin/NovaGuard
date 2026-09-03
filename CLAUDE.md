@@ -71,6 +71,30 @@ sous `try`, et `frameErrorGuard` rattrape le reste — mais seulement ce qui por
 la marque de VisionCamera. Élargir ce filtre transformerait chaque vrai plantage
 en application vivante et inerte, ce qui est pire.
 
+**`runAsync` a tué cette application.** Il déplace l'analyse dans un second
+contexte worklet et maintient l'image vivante d'un thread à l'autre : SIGSEGV
+sur `VisionCamera.video` quelques images après l'apparition de l'aperçu, puis un
+`ImageReader` à court de tampons parce que les images retenues n'étaient jamais
+refermées (même panne ouverte en amont,
+mrousavy/react-native-vision-camera#2589, builds release uniquement). L'analyse
+tourne donc sur le thread qui livre l'image. Elle le bloque, et c'est voulu :
+`runAtTargetFps` et la contre-pression de CameraX écartent déjà les images qu'on
+ne regarde pas, l'aperçu a son propre flux. `__tests__/workletSafety.test.ts`
+vérifie que `runAsync` n'est pas réintroduit.
+
+**Ce qui plante sous le JavaScript ne laisse rien.** Un segfault dans libyuv,
+LiteRT ou ML Kit termine le processus avant le `try` comme avant le garde : pas
+de message, pas de log que l'utilisateur puisse lire. `frameTrace.ts` note donc
+l'appel que l'analyse *s'apprête* à faire — `camera`, `resize`, `inference`,
+`faces` — avant de le faire, et le lancement suivant nomme celui qui n'a jamais
+rendu la main. L'ordre est tout le principe : enregistrer un succès nommerait la
+dernière chose qui a marché, c'est-à-dire tout sauf le coupable. Les sauts
+d'étape dans le worklet sont inconditionnels, et doivent le rester : un drapeau
+serait soit une valeur capturée, figée à la compilation, soit une valeur
+partagée dont le compilateur recopie le `.value` — les deux arrêteraient la
+trace en silence. C'est le côté JS qui cesse d'écrire, dès qu'une image passe
+entière.
+
 **Une nouvelle référence de tableau est un re-rendu.** `confirmedTracksIfChanged`
 existe pour ça : conserver l'identité quand l'incrustation ne changerait pas.
 

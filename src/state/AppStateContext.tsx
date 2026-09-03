@@ -32,6 +32,9 @@ import {
 import { alertContent, shouldAlert } from '../surveillance/alerts';
 import { installFrameErrorGuard } from '../camera/frameErrorGuard';
 import { FRAME_ERROR_PREFIX } from '../camera/frameErrors';
+import {
+  FrameStage, isCompleteFrame, isLaterStage, parseStage, stageDiagnosis,
+} from '../camera/frameTrace';
 import { countFrame, EMPTY_FRAME_RATE_WINDOW, FrameRateWindow } from '../camera/frameRate';
 
 interface AppStateValue {
@@ -56,6 +59,8 @@ interface AppStateValue {
   cameraRef: React.RefObject<VisionCamera | null>;
   /** Camera runtime errors and model load failures, reported from CameraFeed. */
   reportCameraProblem: (message: string | null) => void;
+  /** Called before each native call an analysed frame makes — see `frameTrace.ts`. */
+  reportFrameStage: (stage: FrameStage) => void;
   toggleMonitoring: () => void;
   /** Called from the camera frame-processor (JS thread) with this frame's qualifying detections. */
   reportDetections: (detections: FrameDetection[], frameAspect: number) => void;
@@ -298,13 +303,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [s, storedEvents, dt, ld, wasMonitoring, onboarded] = await Promise.all([
+      const [s, storedEvents, dt, ld, wasMonitoring, onboarded, lastStage] = await Promise.all([
         storage.loadSettings(),
         storage.loadEvents(),
         storage.loadDetToday(),
         storage.loadLastDet(),
         storage.loadMonitoring(),
         storage.loadOnboardingComplete(),
+        storage.loadFrameStage(),
       ]);
       if (cancelled) return;
       // Merged over the defaults rather than used as-is: a settings object
@@ -325,6 +331,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       // and say so rather than showing an empty Historique with no explanation.
       eventsWritableRef.current = storedEvents.ok;
       if (!storedEvents.ok) setRecError('Historique illisible : les vidéos sont conservées');
+      // A stage left behind is a session that never finished a frame. The kind
+      // of failure this catches — a segfault inside libyuv, LiteRT or ML Kit —
+      // ends the process with nothing on screen and nothing in the log the user
+      // can reach, so this is the only account of it they will ever get.
+      else {
+        const diagnosis = stageDiagnosis(parseStage(lastStage));
+        if (diagnosis) setRecError(diagnosis);
+      }
       setDetToday(todayCount(dt, Date.now()));
       if (ld) setLastDet(ld);
       setOnb(onboarded ? null : 'intro');
@@ -783,6 +797,34 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const toggleNotifDet = useCallback(() => patchSettings({ notifDet: !settings.notifDet }), [patchSettings, settings.notifDet]);
   const openAlertSoundSettings = useCallback(() => openDetectionChannelSettings(), []);
 
+  /** The furthest stage this session has entered. */
+  const frameStageRef = useRef<FrameStage | null>(null);
+  /**
+   * Records the call the analysis is about to make, keeping the furthest one.
+   *
+   * The worklet reports every stage of every frame — five frames a second, for
+   * as long as surveillance runs — so this is on the hot path and does almost
+   * nothing after the first complete frame: the last stage is also the furthest
+   * one, so once it is reached nothing compares later and every call stops on
+   * the second line. Walking back would be worse than noise; a crash in
+   * inference would be blamed on the next frame's resize.
+   */
+  const reportFrameStage = useCallback((stage: FrameStage) => {
+    if (!isLaterStage(stage, frameStageRef.current)) return;
+    frameStageRef.current = stage;
+
+    if (isCompleteFrame(stage)) {
+      // A frame made it end to end. Whatever the last session died in, this one
+      // has just proved survivable — so drop the record, and take the diagnosis
+      // down through the same ownership check a camera error clears by, which
+      // leaves a recording or foreground-service message alone.
+      storage.clearFrameStage();
+      setRecError(prev => (prev && CAMERA_OWNED_ERROR.test(prev) ? null : prev));
+      return;
+    }
+    storage.saveFrameStage(stage);
+  }, []);
+
   const reportCameraProblem = useCallback((message: string | null) => {
     // Only clears what it set: a camera that recovers must not wipe an unrelated
     // recording or foreground-service message.
@@ -824,7 +866,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     hydrated,
     tab, setTab,
     monitoring, det, detToday, lastDet,
-    recording: isRecording, recError, storage: store, cameraRef, reportCameraProblem,
+    recording: isRecording, recError, storage: store, cameraRef, reportCameraProblem, reportFrameStage,
     toggleMonitoring, reportDetections,
     events, filter, setFilter, period, setPeriod, periodOpen, togglePeriodOpen, selected, selectedEvent, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete,
@@ -836,7 +878,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     onb, perms, onbNext, onbFinish, grantPermission,
   }), [
     hydrated, tab, monitoring, det, detToday, lastDet,
-    isRecording, recError, store, cameraRef, reportCameraProblem, toggleMonitoring, reportDetections,
+    isRecording, recError, store, cameraRef, reportCameraProblem, reportFrameStage, toggleMonitoring, reportDetections,
     events, filter, period, periodOpen, togglePeriodOpen, selected, selectedEvent, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete, confirmWipe, askWipe, cancelWipe, doWipe,
     settings, toggleSection, cycleCamera, toggleResumeOnLaunch, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom, toggleForceCpu,

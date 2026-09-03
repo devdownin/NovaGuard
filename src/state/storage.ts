@@ -16,6 +16,7 @@ const KEYS = {
   lastDet: '@novaguard:lastDet',
   monitoring: '@novaguard:monitoring',
   onboardingComplete: '@novaguard:onboardingComplete',
+  frameStage: '@novaguard:frameStage',
 } as const;
 
 // '@novaguard:perms' held simulated mic/notification grants; all three
@@ -84,4 +85,22 @@ export const storage = {
 
   loadOnboardingComplete: () => readJson<boolean>(KEYS.onboardingComplete),
   saveOnboardingComplete: (v: boolean) => writeJson(KEYS.onboardingComplete, v),
+
+  /**
+   * The native call the frame processor was inside, written before making it.
+   *
+   * Survives the process because that is the point: the failures this records
+   * do not let the app write anything on the way down. It is cleared the moment
+   * a frame makes it through, so finding one at launch means the previous
+   * session died mid-analysis.
+   */
+  loadFrameStage: () => readJson<string>(KEYS.frameStage),
+  saveFrameStage: (v: string) => writeJson(KEYS.frameStage, v),
+  clearFrameStage: async () => {
+    try {
+      await AsyncStorage.removeItem(KEYS.frameStage);
+    } catch {
+      // A stale stage only costs a message that is one launch out of date.
+    }
+  },
 };
