@@ -71,6 +71,17 @@ sous `try`, et `frameErrorGuard` rattrape le reste — mais seulement ce qui por
 la marque de VisionCamera. Élargir ce filtre transformerait chaque vrai plantage
 en application vivante et inerte, ce qui est pire.
 
+**`runAsync` a tué cette application.** Il déplace l'analyse dans un second
+contexte worklet et maintient l'image vivante d'un thread à l'autre : SIGSEGV
+sur `VisionCamera.video` quelques images après l'apparition de l'aperçu, puis un
+`ImageReader` à court de tampons parce que les images retenues n'étaient jamais
+refermées (même panne ouverte en amont,
+mrousavy/react-native-vision-camera#2589, builds release uniquement). L'analyse
+tourne donc sur le thread qui livre l'image. Elle le bloque, et c'est voulu :
+`runAtTargetFps` et la contre-pression de CameraX écartent déjà les images qu'on
+ne regarde pas, l'aperçu a son propre flux. `__tests__/workletSafety.test.ts`
+vérifie que `runAsync` n'est pas réintroduit.
+
 **Ce qui plante sous le JavaScript ne laisse rien.** Un segfault dans libyuv,
 LiteRT ou ML Kit termine le processus avant le `try` comme avant le garde : pas
 de message, pas de log que l'utilisateur puisse lire. `frameTrace.ts` note donc

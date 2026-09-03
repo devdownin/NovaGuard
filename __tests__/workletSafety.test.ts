@@ -192,7 +192,7 @@ describe('worklet closures', () => {
 
 describe('the compiled analysis worklet', () => {
   /**
-   * The innermost `runAsync` body, pulled straight out of the compiled bundle.
+   * The innermost worklet body, pulled straight out of the compiled bundle.
    *
    * `CameraFeed` cannot be loaded here — it needs the whole React Native
    * runtime — but the worklet's source is a plain string in the output, which
@@ -211,8 +211,9 @@ describe('the compiled analysis worklet', () => {
         }
       },
     });
-    // The one that resizes a frame and never re-enters `runAsync`.
-    const analysis = bodies.filter(body => body.includes('resize(frame') && !body.includes('runAsync('));
+    // The analysis itself, not the frame processor that throttles it: a
+    // nested worklet's source also appears inside its parent's body.
+    const analysis = bodies.filter(body => body.includes('resize(frame') && !body.includes('runAtTargetFps('));
     expect(analysis).toHaveLength(1);
     return analysis[0];
   }
@@ -246,6 +247,19 @@ describe('the compiled analysis worklet', () => {
     const body = new Function(`return (${analysisWorkletSource()})`)();
     body.apply({ __closure: closure });
   }
+
+  it('analyses on the thread the frame arrives on', () => {
+    // `runAsync` moves the work to a second worklet context and keeps the
+    // frame alive across threads. That is where the app died: SIGSEGV on
+    // `VisionCamera.video` within a few frames of the preview appearing, then
+    // an ImageReader out of buffers because the frames it held were never
+    // closed — the same crash upstream has open on the same thread
+    // (mrousavy/react-native-vision-camera#2589). `runAtTargetFps` already
+    // drops the frames we do not want to look at, so nothing is gained by
+    // holding one longer than the callback that delivered it.
+    const compiled = compile(resolve(ROOT, 'src/components/CameraFeed.tsx'));
+    expect(compiled).not.toMatch(/\brunAsync\b/);
+  });
 
   it('hands a frame it analysed to the JS thread', () => {
     const closure = closureFor();
