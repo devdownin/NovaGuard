@@ -11,7 +11,12 @@ export type Sensitivity = 'Basse' | 'Moyenne' | 'Haute';
 export type Camera = 'Arrière (1×)' | 'Arrière (0,5×)' | 'Avant';
 
 export type PostRoll = '5 s' | '10 s' | '30 s';
-export type MaxDuration = '1 min' | '2 min' | '5 min';
+/**
+ * Longest a single clip may run. A passage that outlasts it is not cut short —
+ * it continues in the next clip — so this bounds file size and the granularity
+ * of the history, not how long surveillance keeps filming.
+ */
+export type MaxDuration = '1 min' | '2 min' | '5 min' | '10 min' | '15 min';
 export type Quality = '720p' | '1080p' | '4K';
 export type Retention = '1 jour' | '7 jours' | '30 jours' | '90 jours' | 'Toujours';
 

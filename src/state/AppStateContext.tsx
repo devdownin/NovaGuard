@@ -208,7 +208,7 @@ function cycle<T>(options: readonly T[], current: T): T {
 
 const CAMERA_OPTIONS: Camera[] = ['Arrière (1×)', 'Arrière (0,5×)', 'Avant'];
 const POST_OPTIONS: PostRoll[] = ['5 s', '10 s', '30 s'];
-const MAX_OPTIONS: MaxDuration[] = ['1 min', '2 min', '5 min'];
+const MAX_OPTIONS: MaxDuration[] = ['1 min', '2 min', '5 min', '10 min', '15 min'];
 const QUALITY_OPTIONS: Quality[] = ['720p', '1080p', '4K'];
 
 /**
@@ -423,10 +423,27 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   // fires many times a second and only some updates should trigger a render.
   const sessionKindRef = useRef<DetectionKind | null>(null);
   const sessionStartRef = useRef(0);
+  /**
+   * When the *current clip* began, as opposed to the passage.
+   *
+   * The duration cap ends a file without ending the session, so the two drift
+   * apart: the on-screen counter follows the passage, while the event written
+   * for each clip describes only that clip.
+   */
+  const segmentStartRef = useRef(0);
   const sessionMaxConfRef = useRef(0);
   const tracksRef = useRef<Track[]>([]);
-  /** Set while a stop is in flight, so the arriving clip knows what it belongs to. */
-  const pendingRef = useRef<{ kind: DetectionKind; dur: number; conf: number } | null>(null);
+  /**
+   * Set while a stop is in flight, so the arriving clip knows what it belongs to.
+   *
+   * `rollover` says the stop came from the duration cap with the subject still
+   * in frame: the clip is filed as its own event, but the passage is not over,
+   * so the session survives it and the next clip opens as soon as this one is
+   * filed.
+   */
+  const pendingRef = useRef<
+    { kind: DetectionKind; dur: number; conf: number; rollover: boolean } | null
+  >(null);
   /** Post-roll: keep rolling for a moment after the last subject leaves. */
   const postRollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** When the last detection alert went out, for the cooldown. */
@@ -440,6 +457,15 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
    * `JSON.parse` that restores it from disk.
    */
   const lastEventIdRef = useRef(0);
+  /**
+   * The recorder's own `start` and `stop`, reached through refs.
+   *
+   * The recorder takes `onClip` and the cap hook as options, so it is built
+   * below the callbacks that need to drive it back — one of the two directions
+   * has to be indirect.
+   */
+  const startRecordingRef = useRef<() => boolean>(() => false);
+  const stopRecordingRef = useRef<() => boolean>(() => false);
 
   const commitEvent = useCallback((
     kind: DetectionKind, dur: number, c: number, clip: Clip | null, at: number = Date.now(),
@@ -473,11 +499,25 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     viewfinder.current?.setRecSec(0);
   }, []);
 
+  /** Describes the clip being closed, not the passage that may outlive it. */
   const sessionMeta = useCallback(() => ({
     kind: sessionKindRef.current as DetectionKind,
-    dur: Math.max(1, Math.round((Date.now() - sessionStartRef.current) / 1000)),
+    dur: Math.max(1, Math.round((Date.now() - segmentStartRef.current) / 1000)),
     conf: Math.round(sessionMaxConfRef.current * 100),
   }), []);
+
+  /**
+   * Opens the next clip of a passage the duration cap has just cut.
+   *
+   * A refused start is the one case that must not be swallowed: the session
+   * would stay open with nothing being written, and `reportDetections` only
+   * starts a recording when it *opens* a session — so the rest of the passage
+   * would go to disk nowhere. Closing the session instead hands the next frame
+   * a clean slate to reopen from.
+   */
+  const openNextSegment = useCallback(() => {
+    if (!startRecordingRef.current()) clearSession();
+  }, [clearSession]);
 
   /**
    * Files the finished clip against the detection that caused it, under a name
@@ -492,9 +532,11 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     const pending = pendingRef.current;
     pendingRef.current = null;
 
-    // The duration cap can cut a clip while the subject is still in frame; the
-    // next frame reopens a session, so a long passage becomes consecutive clips.
     const meta = pending ?? (sessionKindRef.current != null ? sessionMeta() : null);
+    // The duration cap cut this clip with the subject still in frame. The
+    // passage carries on, so the session is still open and the next clip opens
+    // now — `rollSegment` has already moved the segment window forward.
+    const continues = pending?.rollover === true && sessionKindRef.current != null;
 
     switch (clipOutcome(meta != null, clip.bytes)) {
       case 'discard':
@@ -509,17 +551,62 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         if (!pending) clearSession();
         deleteFile(clip.path);
         commitEvent(meta!.kind, meta!.dur, meta!.conf, null);
+        if (continues) openNextSegment();
         return;
 
       case 'attach': {
         if (!pending) clearSession();
+        // Before the rename, not after: the encoder is free the moment the clip
+        // landed, and every millisecond spent elsewhere is footage nobody has.
+        if (continues) openNextSegment();
         const at = Date.now();
         renameRecording(clip.path, clipFileName(meta!.kind, at)).then(path => {
           commitEvent(meta!.kind, meta!.dur, meta!.conf, { ...clip, path }, at);
         });
       }
     }
-  }, [clearSession, commitEvent, sessionMeta]);
+  }, [clearSession, commitEvent, openNextSegment, sessionMeta]);
+
+  /**
+   * The clip a stop was waiting on never arrived — the encoder did not answer
+   * within `FINALIZE_TIMEOUT_MS`. Nothing else will write the event that clip
+   * was carrying, and if the passage is still running it now has no recording.
+   */
+  const onClipAbandoned = useCallback(() => {
+    const pending = pendingRef.current;
+    pendingRef.current = null;
+    if (!pending) return;
+    if (pending.rollover && sessionKindRef.current != null) openNextSegment();
+    commitEvent(pending.kind, pending.dur, pending.conf, null);
+  }, [commitEvent, openNextSegment]);
+
+  /**
+   * The duration cap has expired with the subject still in frame.
+   *
+   * A clip has to end — the cap is what keeps a passage from becoming one
+   * unbounded file — but the passage has not. Closing the clip *here*, rather
+   * than letting the recorder stop behind the session's back, is what makes the
+   * difference: the clip leaves with the metadata of the segment it holds, the
+   * session keeps its kind, its start time and its alert cooldown, and `onClip`
+   * opens the next clip the moment this one is filed. Left to the recorder, the
+   * session was instead torn down and rebuilt from the next frame — which reset
+   * the on-screen counter, dropped the detection badge, re-fired the
+   * notification, and, if the subject happened to leave during finalisation,
+   * discarded the clip as unclaimed.
+   */
+  const rollSegment = useCallback(() => {
+    if (sessionKindRef.current == null) return;
+    const meta = sessionMeta();
+    // Nothing was actually being written (no permission, disk full): there is no
+    // clip to close, so there is nothing to roll over to either.
+    if (!stopRecordingRef.current()) return;
+    pendingRef.current = { ...meta, rollover: true };
+    // The next clip's window starts now. Confidence restarts from whatever is in
+    // frame at this instant so each event describes its own clip.
+    const primary = primaryTrack(tracksRef.current);
+    segmentStartRef.current = Date.now();
+    sessionMaxConfRef.current = primary ? primary.maxConfidence : 0;
+  }, [sessionMeta]);
 
   const recorder = useRecorder({
     cameraRef,
@@ -527,12 +614,18 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     max: settings.max,
     onClip,
     onError: setRecError,
+    onMaxDuration: rollSegment,
+    onAbandoned: onClipAbandoned,
   });
   // Depend on the two callbacks rather than the recorder object: it is a fresh
   // literal every render, and `reportDetections` feeds the frame processor's
   // dependency list — an identity that churned every render would rebuild the
   // worklet several times a second.
   const { isRecording, start: startRecording, stop: stopRecording } = recorder;
+  // Written on commit rather than during render: no clip can land, and no cap
+  // can expire, before the recorder has been started — which needs a commit.
+  useEffect(() => { startRecordingRef.current = startRecording; }, [startRecording]);
+  useEffect(() => { stopRecordingRef.current = stopRecording; }, [stopRecording]);
 
   // Same reason: everything `reportDetections` reads that changes while it runs
   // goes through a ref, so its identity — and the worklet's — survives. Free
@@ -554,8 +647,19 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     cancelPostRoll();
     const meta = sessionMeta();
     clearSession();
+
+    // A cap-driven cut may still be in flight. Its clip already carries an
+    // event, so all this has to do is cancel the continuation — stopping again
+    // would answer false and mint a second, file-less event for a segment that
+    // recorded nothing, while the real clip landed to a closed session and was
+    // deleted as unclaimed.
+    if (pendingRef.current) {
+      pendingRef.current = { ...pendingRef.current, rollover: false };
+      return;
+    }
+
     if (stopRecording()) {
-      pendingRef.current = meta;    // the clip will carry the event
+      pendingRef.current = { ...meta, rollover: false };   // the clip carries the event
     } else {
       // Nothing was recording (no permission, disk full, camera gone). The
       // sighting still happened, so keep it — just without a file.
@@ -591,6 +695,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       if (sessionKindRef.current == null) {
         sessionKindRef.current = primary.kind;
         sessionStartRef.current = now;
+        segmentStartRef.current = now;
         sessionMaxConfRef.current = primary.maxConfidence;
         viewfinder.current?.setRecSec(0);
         // Refuse to start on a nearly full volume rather than letting the

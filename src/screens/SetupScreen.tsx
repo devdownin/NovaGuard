@@ -113,7 +113,10 @@ export function SetupScreen() {
           <SettingRow label="Durée après détection">
             <ValueButton label={settings.post} onPress={s.cyclePost} />
           </SettingRow>
-          <SettingRow label="Durée maximale">
+          <SettingRow
+            label="Durée max. par clip"
+            subtitle="L’enregistrement continue tant qu’un sujet est visible : au-delà, il se poursuit dans un nouveau clip"
+          >
             <ValueButton label={settings.max} onPress={s.cycleMax} />
           </SettingRow>
           <SettingRow

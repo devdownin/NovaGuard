@@ -65,11 +65,23 @@ export function periodRange(period: Period, now: number): { from: number; to: nu
   };
 }
 
+/**
+ * Longest a single clip may run.
+ *
+ * The cap ends a *file*, not a passage: a subject still in frame carries the
+ * session into the next clip. It exists because an unbounded MP4 is one the
+ * encoder eventually refuses, one no retention sweep can trim by halves, and
+ * one a user cannot scrub. The `default` matters — `max` is restored from disk,
+ * so an option removed in a later version must degrade to a sane length rather
+ * than to `NaN`, which `setTimeout` fires on immediately.
+ */
 export function maxDurationMs(max: MaxDuration): number {
   switch (max) {
     case '1 min': return 60_000;
     case '2 min': return 120_000;
     case '5 min': return 300_000;
+    case '10 min': return 600_000;
+    case '15 min': return 900_000;
     default: return 120_000;
   }
 }

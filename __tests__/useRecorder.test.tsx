@@ -37,7 +37,10 @@ function fakeCamera() {
 
 async function mount(
   camera: ReturnType<typeof fakeCamera>,
-  { enabled = true, max = '1 min' as MaxDuration, onClip = jest.fn(), onError = jest.fn() } = {},
+  {
+    enabled = true, max = '1 min' as MaxDuration, onClip = jest.fn(), onError = jest.fn(),
+    onMaxDuration = jest.fn(), onAbandoned = jest.fn(),
+  } = {},
 ) {
   const box = {} as Harness & { onClip: jest.Mock; onError: jest.Mock; unmount: () => void };
   box.onClip = onClip as jest.Mock;
@@ -45,7 +48,9 @@ async function mount(
 
   function Probe({ enabled: on, max: cap }: { enabled: boolean; max: MaxDuration }) {
     const ref = useRef<Camera | null>(camera as unknown as Camera);
-    box.recorder = useRecorder({ cameraRef: ref, enabled: on, max: cap, onClip, onError });
+    box.recorder = useRecorder({
+      cameraRef: ref, enabled: on, max: cap, onClip, onError, onMaxDuration, onAbandoned,
+    });
     return null;
   }
 
@@ -195,6 +200,92 @@ it('drops the duration cap once the clip has landed, so it cannot cut the next o
 
   await ReactTestRenderer.act(async () => { jest.advanceTimersByTime(2_000); });
   expect(camera.stopRecording).toHaveBeenCalledTimes(1);
+});
+
+/**
+ * The cap ends a file; whether it ends the *passage* is not the recorder's
+ * call. Handing the expiry over first is what lets the session layer close the
+ * clip with its own metadata and open the next one — before that, the session
+ * was torn down and rebuilt from the next frame.
+ */
+describe('the duration cap', () => {
+  it('hands the expiry to the session layer before cutting', async () => {
+    const camera = fakeCamera();
+    const onMaxDuration = jest.fn();
+    const h = await mount(camera, { max: '1 min', onMaxDuration });
+
+    await ReactTestRenderer.act(async () => { h.recorder.start(); });
+    expect(onMaxDuration).not.toHaveBeenCalled();
+
+    await ReactTestRenderer.act(async () => { jest.advanceTimersByTime(maxDurationMs('1 min')); });
+    expect(onMaxDuration).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not cut a second time when the handler already stopped the clip', async () => {
+    const camera = fakeCamera();
+    const box = {} as { recorder: ReturnType<typeof useRecorder> };
+    const onMaxDuration = jest.fn(() => { box.recorder.stop(); });
+    const h = await mount(camera, { max: '1 min', onMaxDuration });
+    box.recorder = h.recorder;
+
+    await ReactTestRenderer.act(async () => { h.recorder.start(); });
+    await ReactTestRenderer.act(async () => { jest.advanceTimersByTime(maxDurationMs('1 min')); });
+
+    // A second stopRecording() throws inside VisionCamera, and the old code
+    // read that throw as proof nothing was recording.
+    expect(camera.stopRecording).toHaveBeenCalledTimes(1);
+  });
+
+  it('still cuts the clip when the handler does nothing', async () => {
+    const camera = fakeCamera();
+    const h = await mount(camera, { max: '1 min', onMaxDuration: jest.fn() });
+
+    await ReactTestRenderer.act(async () => { h.recorder.start(); });
+    await ReactTestRenderer.act(async () => { jest.advanceTimersByTime(maxDurationMs('1 min')); });
+
+    // Otherwise a handler that declined to act would turn the maximum duration
+    // into no maximum at all, which is an MP4 that grows until the encoder quits.
+    expect(camera.stopRecording).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a stop the encoder never answers', () => {
+  it('says so, since no clip is coming', async () => {
+    const camera = fakeCamera();
+    const onAbandoned = jest.fn();
+    const h = await mount(camera, { onAbandoned });
+
+    await ReactTestRenderer.act(async () => { h.recorder.start(); });
+    await ReactTestRenderer.act(async () => { h.recorder.stop(); });
+    await ReactTestRenderer.act(async () => {
+      jest.advanceTimersByTime(FINALIZE_TIMEOUT_MS - 1);
+    });
+    expect(onAbandoned).not.toHaveBeenCalled();
+
+    // Whatever the caller set aside for that clip — the event it was to carry —
+    // is otherwise dropped without a word.
+    await ReactTestRenderer.act(async () => { jest.advanceTimersByTime(1); });
+    expect(onAbandoned).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays quiet when the clip does land', async () => {
+    const camera = fakeCamera();
+    const onAbandoned = jest.fn();
+    const h = await mount(camera, { onAbandoned });
+
+    await ReactTestRenderer.act(async () => { h.recorder.start(); });
+    await ReactTestRenderer.act(async () => { h.recorder.stop(); });
+    await ReactTestRenderer.act(async () => {
+      camera.last().onRecordingFinished({ path: '/clips/a.mp4', duration: 3 });
+    });
+    await ReactTestRenderer.act(async () => {
+      jest.advanceTimersByTime(FINALIZE_TIMEOUT_MS * 2);
+    });
+
+    // The clip was handed over; announcing it abandoned as well would have the
+    // caller write a second, file-less event for it.
+    expect(onAbandoned).not.toHaveBeenCalled();
+  });
 });
 
 it('surfaces an encoder error and clears the in-flight state', async () => {
