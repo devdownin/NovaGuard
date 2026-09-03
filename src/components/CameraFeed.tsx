@@ -13,6 +13,7 @@ import { uprightBoxToViewBox } from '../camera/framing';
 import { useDetectionModel } from '../camera/useDetectionModel';
 import { interpretDetections } from '../ml/interpretDetections';
 import { frameErrorMessage } from '../camera/frameErrors';
+import { FrameStage } from '../camera/frameTrace';
 import { qualityBitRate, qualityResolution } from '../recording/library';
 import { DetectionBox, FrameDetection } from '../ml/types';
 
@@ -44,6 +45,11 @@ interface CameraFeedProps {
   cameraRef?: RefObject<Camera | null>;
   /** Camera and model failures, which are otherwise completely silent. */
   onProblem?: (message: string | null) => void;
+  /**
+   * Called before each native call the analysis makes, so a crash that takes
+   * the process down still says which one it was in. See `frameTrace.ts`.
+   */
+  onStage?: (stage: FrameStage) => void;
 }
 
 /**
@@ -54,7 +60,7 @@ interface CameraFeedProps {
  * (Viewfinder) falls back to the decorative standby view in that case.
  */
 export function CameraFeed({
-  style, active, viewWidth, viewHeight, onFrame, cameraRef, onProblem,
+  style, active, viewWidth, viewHeight, onFrame, cameraRef, onProblem, onStage,
 }: CameraFeedProps) {
   const { perms, settings, reportDetections } = useAppState();
 
@@ -84,6 +90,18 @@ export function CameraFeed({
     if (!onProblem) return;
     onProblem(modelFailed ? 'Modèle de détection impossible à charger' : null);
   }, [modelFailed, onProblem]);
+
+  // Recorded as soon as the camera is asked to open, because opening it is
+  // itself native work: CameraX configures a session and binds an ImageAnalysis
+  // use case, and a device that dies there never reaches the frame processor at
+  // all. Without this, the trace such a launch leaves is empty — indistinguishable
+  // from a launch that never started surveillance.
+  useEffect(() => {
+    // Gated on the same condition the render is: with no permission or no
+    // device this component draws nothing, and blaming a camera that was never
+    // opened would send the reader after the wrong failure.
+    if (active && perms.cam && device != null) onStage?.('camera');
+  }, [active, device, onStage, perms.cam]);
 
   // `autoMode` asks the plugin to scale and rotate face bounds natively against
   // the window size we hand it — passing the viewfinder's own size means bounds
@@ -135,6 +153,18 @@ export function CameraFeed({
     onProblem?.(frameErrorMessage(message));
   }, [onProblem]);
 
+  // Deliberately unconditional, and deliberately not gated on a flag the
+  // worklet reads. A flag would have to be a captured value — which the
+  // compiler freezes at build time — or a shared value, whose `.value` the
+  // compiler hoists into a copy. Both would silently stop tracing. The cost of
+  // getting it wrong is a diagnostic that lies; the cost of always hopping is
+  // four cross-runtime calls per analysed frame, against a resize and an
+  // inference that each take milliseconds. The JS side stops recording as soon
+  // as one frame gets through (see `reportFrameStage`).
+  const onFrameStage = useRunOnJS((stage: FrameStage) => {
+    onStage?.(stage);
+  }, [onStage]);
+
   const targetFps = FPS_BY_SENSITIVITY[settings.sens];
   const detectPerson = settings.person;
   const detectAnimal = settings.animal;
@@ -156,6 +186,11 @@ export function CameraFeed({
         // and the app closes. A failing detector is a degraded camera; it must
         // read as a message in the viewfinder, not as the app disappearing.
         try {
+          // Each `onFrameStage` names the call that comes next, never the one
+          // that just finished: libyuv, LiteRT and ML Kit can all end the
+          // process outright, and a record of the last thing that worked names
+          // everything except the culprit.
+          onFrameStage('resize');
           // Feed the model the WHOLE frame, uprighted. The previous version let
           // the plugin centre-crop to a square, which threw away the sides of the
           // field of view, and left the scene rotated for a portrait-held phone.
@@ -166,12 +201,14 @@ export function CameraFeed({
             pixelFormat: 'rgb',
             dataType: 'uint8',
           });
+          onFrameStage('inference');
           // The model's 4 outputs are always float32 (see interpretDetections' doc comment).
           const outputs = model.runSync([resized]) as Float32Array[];
           const detections = interpretDetections(outputs, { detectPerson, detectAnimal, minConfidence });
 
           const faces: DetectionBox[] = [];
           if (autoZoom) {
+            onFrameStage('faces');
             const detected = detectFaces(frame);
             for (let i = 0; i < detected.length; i++) {
               const b = detected[i].bounds;
@@ -179,6 +216,7 @@ export function CameraFeed({
             }
           }
 
+          onFrameStage('report');
           onJsFrame(detections, faces, uprightAspect(frame.width, frame.height, frame.orientation));
         } catch (e) {
           // Plain property access, no `instanceof`: the worklet runtime is not
@@ -188,7 +226,7 @@ export function CameraFeed({
         }
       });
     });
-  }, [model, resize, onJsFrame, onFrameError, detectFaces, autoZoom, viewW, viewH, targetFps, detectPerson, detectAnimal, minConfidence]);
+  }, [model, resize, onJsFrame, onFrameError, onFrameStage, detectFaces, autoZoom, viewW, viewH, targetFps, detectPerson, detectAnimal, minConfidence]);
 
   if (!perms.cam || device == null) return null;
 

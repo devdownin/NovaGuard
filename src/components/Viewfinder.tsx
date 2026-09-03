@@ -80,6 +80,7 @@ export function Viewfinder() {
   // component only re-renders when a session starts or a setting changes.
   const {
     monitoring, det, perms, settings, recording, recError, cameraRef, reportCameraProblem,
+    reportFrameStage,
   } = useAppState();
 
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -150,6 +151,7 @@ export function Viewfinder() {
           onFrame={autoZoom.submitFrame}
           cameraRef={cameraRef}
           onProblem={reportCameraProblem}
+          onStage={reportFrameStage}
         />
 
         <DetectionOverlay viewWidth={size.width} viewHeight={size.height} />

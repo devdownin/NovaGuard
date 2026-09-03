@@ -236,6 +236,7 @@ describe('the compiled analysis worklet', () => {
       onJsFrame: jest.fn(),
       uprightAspect: () => 9 / 16,
       onFrameError: jest.fn(),
+      onFrameStage: jest.fn(),
       ...overrides,
     };
   }
@@ -251,6 +252,38 @@ describe('the compiled analysis worklet', () => {
     runAnalysis(closure);
     expect(closure.onJsFrame).toHaveBeenCalled();
     expect(closure.onFrameError).not.toHaveBeenCalled();
+  });
+
+  it('names each native call before making it, not after', () => {
+    // The order is the diagnostic: a stage recorded on the way *in* names the
+    // call that killed the process, where one recorded on the way out would
+    // name the last thing that worked.
+    const closure = closureFor();
+    runAnalysis(closure);
+
+    const stages = (closure.onFrameStage as jest.Mock).mock.calls.map(([s]) => s);
+    // `faces` is absent because this closure has autoZoom off — the stage is
+    // only claimed when the call is actually about to happen.
+    expect(stages).toEqual(['resize', 'inference', 'report']);
+  });
+
+  it('claims the face-detection stage only when it runs', () => {
+    const closure = closureFor({ autoZoom: true });
+    runAnalysis(closure);
+
+    const stages = (closure.onFrameStage as jest.Mock).mock.calls.map(([s]) => s);
+    expect(stages).toEqual(['resize', 'inference', 'faces', 'report']);
+  });
+
+  it('leaves the stage at the call that threw', () => {
+    // The whole point: the last stage named is the one the process was inside.
+    const closure = closureFor({
+      model: { runSync: () => { throw new Error('boom'); } },
+    });
+    runAnalysis(closure);
+
+    const stages = (closure.onFrameStage as jest.Mock).mock.calls.map(([s]) => s);
+    expect(stages[stages.length - 1]).toBe('inference');
   });
 
   it('reports a failure instead of letting it close the app', () => {
