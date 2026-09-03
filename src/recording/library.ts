@@ -9,10 +9,19 @@ import { startOfDayBefore } from '../utils/date';
  * unit-tested — `videoStore.ts` holds the side effects.
  */
 
-/** Below this much free space, auto-delete starts reclaiming room. */
+/**
+ * Floor under {@link lowSpaceBytes}: auto-delete reclaims at least to here.
+ *
+ * A volume this empty is worth clearing whatever the clip settings are.
+ */
 export const LOW_SPACE_BYTES = 500 * 1024 * 1024;
 
-/** Never start a recording without at least this much headroom. */
+/**
+ * Headroom a recording needs *on top of* the clip it is about to write.
+ *
+ * This is what the rest of the app and the OS need to keep working — not part
+ * of what the clip itself will occupy. See {@link minFreeBytes}.
+ */
 export const MIN_FREE_BYTES = 150 * 1024 * 1024;
 
 export function formatBytes(bytes: number): string {
@@ -124,6 +133,44 @@ export function qualityBitRate(quality: Quality): number {
 }
 
 /**
+ * Bytes a clip of `max` at `quality` is expected to occupy.
+ *
+ * What the encoder was *asked* for, not a measurement: `qualityBitRate` is the
+ * target handed to the encoder, and a real file varies with how much the scene
+ * moves. Thresholds built on this carry their own headroom rather than treating
+ * it as exact.
+ */
+export function expectedClipBytes(quality: Quality, max: MaxDuration): number {
+  const bytesPerSecond = (qualityBitRate(quality) * 1_000_000) / 8;
+  return bytesPerSecond * (maxDurationMs(max) / 1000);
+}
+
+/**
+ * Free space a volume must have before a recording may start.
+ *
+ * A flat 150 Mo was the bug: it admitted a clip that needs 2,2 Go — fifteen
+ * minutes at 4K — so the encoder ran out of room mid-clip and the whole passage
+ * was lost, which is the one thing this guard exists to prevent. It was already
+ * wrong at five minutes in 4K (750 Mo); the longer options only made the gap
+ * impossible to miss. Scaling with the settings is what keeps the guard honest
+ * whatever the user picks.
+ */
+export function minFreeBytes(quality: Quality, max: MaxDuration): number {
+  return MIN_FREE_BYTES + expectedClipBytes(quality, max);
+}
+
+/**
+ * Free space below which auto-delete starts reclaiming.
+ *
+ * Never below {@link minFreeBytes}: reclaiming to a mark that still refuses a
+ * recording would delete the user's history and leave the camera unable to
+ * record anyway — the worst of both.
+ */
+export function lowSpaceBytes(quality: Quality, max: MaxDuration): number {
+  return Math.max(LOW_SPACE_BYTES, minFreeBytes(quality, max));
+}
+
+/**
  * What becomes of a clip the encoder has just handed back.
  *
  * There are exactly three outcomes and no fourth. "Nothing" used to be the
@@ -215,9 +262,15 @@ export function eventsToReclaim(events: DetectionEvent[], bytesNeeded: number): 
   return picked;
 }
 
-/** How many bytes auto-delete should reclaim to get back above the low-space mark. */
-export function bytesToReclaim(freeSpace: number): number {
-  return Math.max(0, LOW_SPACE_BYTES - freeSpace);
+/**
+ * How many bytes auto-delete should reclaim to get back above the low-space mark.
+ *
+ * `target` is passed in rather than read from the constant: it depends on the
+ * clip settings now, and a default here would let a caller silently reclaim to
+ * a mark that cannot fit the clip it is about to record.
+ */
+export function bytesToReclaim(freeSpace: number, target: number): number {
+  return Math.max(0, target - freeSpace);
 }
 
 export function sameDay(a: number, b: number): boolean {
