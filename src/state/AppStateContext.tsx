@@ -5,7 +5,7 @@ import type { Camera as VisionCamera } from 'react-native-vision-camera';
 import { Camera as CameraModule, useCameraPermission, useMicrophonePermission } from 'react-native-vision-camera';
 import {
   Camera, DetectionEvent, DetectionKind, ExpandedSections, HistoryFilter, InfoPanel,
-  MaxDuration, OnboardingStep, Period, Permissions, PostRoll, Quality,
+  MaxDuration, OnboardingStep, Period, PermissionOutcome, Permissions, PostRoll, Quality,
   Retention, Sensitivity, Settings, StorageInfo, Tab, VolumeSpace,
 } from './types';
 import {
@@ -26,8 +26,8 @@ import {
 } from '../recording/videoStore';
 import {
   dismissDetectionAlert, foregroundServiceError, hasNotificationPermission, notifyDetection,
-  openDetectionChannelSettings, requestNotificationPermission, startForegroundService,
-  stopForegroundService,
+  openAppSettings, openDetectionChannelSettings, requestNotificationPermission,
+  startForegroundService, stopForegroundService,
 } from '../surveillance/foregroundService';
 import { alertContent, shouldAlert } from '../surveillance/alerts';
 import { installFrameErrorGuard } from '../camera/frameErrorGuard';
@@ -1010,16 +1010,34 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     setOnb(null);
     storage.saveOnboardingComplete(true);
   }, []);
-  const grantPermission = useCallback((key: keyof Permissions) => {
+  /**
+   * Asks the OS for one permission, and falls back to settings when it won't ask.
+   *
+   * Android stops showing the dialog once a permission has been refused for
+   * good: the request then resolves having displayed nothing, so a button
+   * wired straight to it looks broken. `blocked` is that case, and the only
+   * way back from it is the app's own settings page.
+   *
+   * VisionCamera answers its two requests with a bare boolean, so the status
+   * is read back afterwards to tell a refusal from a refusal that sticks.
+   */
+  const grantPermission = useCallback(async (key: keyof Permissions) => {
+    let outcome: PermissionOutcome;
+
     if (key === 'cam') {
-      cameraPermission.requestPermission();
-      return;
+      outcome = await cameraPermission.requestPermission()
+        ? 'granted'
+        : CameraModule.getCameraPermissionStatus() === 'denied' ? 'blocked' : 'denied';
+    } else if (key === 'mic') {
+      outcome = await microphonePermission.requestPermission()
+        ? 'granted'
+        : CameraModule.getMicrophonePermissionStatus() === 'denied' ? 'blocked' : 'denied';
+    } else {
+      outcome = await requestNotificationPermission();
+      setNotifGranted(outcome === 'granted');
     }
-    if (key === 'mic') {
-      microphonePermission.requestPermission();
-      return;
-    }
-    requestNotificationPermission().then(setNotifGranted);
+
+    if (outcome === 'blocked') openAppSettings();
   }, [cameraPermission, microphonePermission]);
 
   const value = useMemo<AppStateValue>(() => ({

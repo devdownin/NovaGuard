@@ -5,6 +5,7 @@ import { useAppState } from '../state/AppStateContext';
 import { THIRD_PARTY_LICENSES } from '../constants/app';
 import { Sheet } from './Sheet';
 import { PrimaryOutlineButton } from './OutlineButton';
+import { ValueButton } from './SetupRows';
 
 const TITLES: Record<'perms' | 'data' | 'licenses', string> = {
   perms: 'Permissions',
@@ -13,13 +14,23 @@ const TITLES: Record<'perms' | 'data' | 'licenses', string> = {
 };
 
 export function InfoSheet() {
-  const { info, closeInfo, perms, events } = useAppState();
+  const { info, closeInfo, perms, events, grantPermission } = useAppState();
 
+  /**
+   * Refusing a permission has to be recoverable here.
+   *
+   * Onboarding was the only place in the app that ever asked for one, and it is
+   * shown once — so a permission refused there, which that screen explicitly
+   * invites for the microphone and the notifications, could never be granted
+   * again. This panel was the natural second chance and only reported the
+   * state it was powerless to change.
+   */
   const rows = info === 'perms'
     ? [
-      { label: 'Caméra', note: 'Flux vidéo local', value: perms.cam ? 'Autorisée' : 'Refusée' },
-      { label: 'Microphone', note: 'Audio des vidéos', value: perms.mic ? 'Autorisé' : 'Refusé' },
-      { label: 'Notifications', note: 'Alertes de détection', value: perms.notif ? 'Autorisées' : 'Refusées' },
+      { key: 'cam' as const, label: 'Caméra', note: 'Flux vidéo local', value: 'Autorisée' },
+      { key: 'mic' as const, label: 'Microphone', note: 'Audio des vidéos', value: 'Autorisé' },
+      { key: 'notif' as const, label: 'Notifications', note: 'Alertes de détection', value: 'Autorisées' },
+      // Granted by installing the app: nothing to ask for, so nothing to press.
       { label: 'Stockage', note: 'Écriture des vidéos', value: 'Autorisé' },
     ]
     : info === 'licenses'
@@ -34,15 +45,21 @@ export function InfoSheet() {
   return (
     <Sheet visible={!!info} onClose={closeInfo} maxHeightPercent={76}>
       <Text style={styles.title}>{info ? TITLES[info] : ''}</Text>
-      {rows.map(row => (
-        <View key={row.label} style={styles.row}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.label}>{row.label}</Text>
-            <Text style={styles.note}>{row.note}</Text>
+      {rows.map(row => {
+        const key = 'key' in row ? row.key : null;
+        const granted = key ? perms[key] : true;
+        return (
+          <View key={row.label} style={styles.row} testID={key ? `perm-${key}` : undefined}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>{row.label}</Text>
+              <Text style={styles.note}>{row.note}</Text>
+            </View>
+            {granted
+              ? <Text style={styles.value}>{row.value}</Text>
+              : <ValueButton label="Autoriser" onPress={() => grantPermission(key!)} />}
           </View>
-          <Text style={styles.value}>{row.value}</Text>
-        </View>
-      ))}
+        );
+      })}
       <PrimaryOutlineButton label="Fermer" onPress={closeInfo} style={{ width: '100%', marginTop: 16 }} />
     </Sheet>
   );

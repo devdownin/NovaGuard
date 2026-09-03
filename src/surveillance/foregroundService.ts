@@ -1,5 +1,6 @@
-import { PermissionsAndroid } from 'react-native';
+import { Linking, PermissionsAndroid } from 'react-native';
 import NativeSurveillanceService from '../specs/NativeSurveillanceService';
+import { PermissionOutcome } from '../state/types';
 
 /**
  * Thin wrapper over the native foreground service.
@@ -92,14 +93,35 @@ export function openDetectionChannelSettings(): void {
  * silently withheld without it, which would leave the camera running with no
  * visible indication. Asked for at the same moment as the other permissions.
  */
-export async function requestNotificationPermission(): Promise<boolean> {
+export async function requestNotificationPermission(): Promise<PermissionOutcome> {
   try {
     const result = await PermissionsAndroid.request(
       PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
     );
-    return result === PermissionsAndroid.RESULTS.GRANTED;
+    if (result === PermissionsAndroid.RESULTS.GRANTED) return 'granted';
+    // Told apart from a plain refusal on purpose: Android shows no dialog at
+    // all once this is the answer, so a caller that collapsed the two into
+    // `false` could only offer a button that does nothing you can see.
+    if (result === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) return 'blocked';
+    return 'denied';
   } catch {
-    return false;
+    return 'denied';
+  }
+}
+
+/**
+ * Opens this app's page in Android settings.
+ *
+ * The only way back once a permission is refused for good — the in-app request
+ * returns immediately and shows nothing. Distinct from
+ * {@link openDetectionChannelSettings}, which tunes a channel the app is
+ * already allowed to post on.
+ */
+export function openAppSettings(): void {
+  try {
+    Linking.openSettings();
+  } catch {
+    // Nothing better to fall back to; the caller has already said what it wants.
   }
 }
 
