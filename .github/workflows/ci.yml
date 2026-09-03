@@ -55,13 +55,75 @@ jobs:
           find android/app/src/main/res -name '*.xml' -print0 \
             | xargs -0 --no-run-if-empty xmllint --noout
 
+  # Whether this pull request can break the native build.
+  #
+  # `check` compiles no Android resource beyond asserting each XML is
+  # well-formed, and `toolchainPinning` only compares version strings between
+  # three files. Neither runs Gradle, so a manifest error, a native module
+  # demanding a different NDK, or a dependency whose autolinked code does not
+  # compile reached `main` untouched — the class of failure that once kept the
+  # APK broken across eleven merges.
+  #
+  # A separate job rather than `paths:`, which GitHub only honours at workflow
+  # level: putting the whole build behind a path filter would need either a
+  # second copy of it or a reusable-workflow refactor, and two copies of the
+  # release path drifting apart is the very thing this repository keeps one
+  # command to avoid.
+  changes:
+    name: Android-relevant changes
+    runs-on: ubuntu-latest
+    outputs:
+      android: ${{ steps.filter.outputs.android }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Both ends of the comparison have to be present for `...` to find
+          # their merge base.
+          fetch-depth: 0
+
+      - id: filter
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != 'pull_request' ]; then
+            # Every other trigger decides for itself below; this job exists so
+            # `build-apk` can depend on it unconditionally without being
+            # skipped along with it.
+            echo 'android=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # `src/specs` is JavaScript that codegen turns into native sources, so
+          # it belongs here as much as `android/` does. package-lock covers a
+          # dependency whose native code is autolinked into the build.
+          #
+          # The Dockerfile and the build scripts are deliberately absent:
+          # android-image.yml is already path-filtered on them and builds an APK
+          # with the image it produces, so listing them here would download
+          # several gigabytes of SDK twice for one pull request.
+          CHANGED=$(git diff --name-only "$BASE...$HEAD")
+          echo "$CHANGED"
+          if printf '%s\n' "$CHANGED" | grep -qE '^(android/|src/specs/|package\.json$|package-lock\.json$|\.github/workflows/ci\.yml$)'; then
+            echo 'Native build can be affected: building an APK.'
+            echo 'android=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'Nothing here reaches the native build; skipping the APK.'
+            echo 'android=false' >> "$GITHUB_OUTPUT"
+          fi
+
   build-apk:
     name: Build Android APK
-    needs: check
+    needs: [check, changes]
     runs-on: ubuntu-latest
-    # Runs after every merge to main, on version tag pushes (e.g. v1.0.0), plus on demand
-    # (workflow_dispatch) for any branch — a native Android build is too slow to run on every PR push.
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')))
+    # After every merge to main, on version tag pushes (e.g. v1.0.0), on demand
+    # (workflow_dispatch) for any branch — and on a pull request that touches
+    # anything the native build reads. An ordinary JavaScript-only pull request
+    # still pays nothing: a native build is far too slow to run on every push.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')))
+      || (github.event_name == 'pull_request' && needs.changes.outputs.android == 'true')
     permissions:
       contents: write
       # Only to pull the toolchain image published by android-image.yml.
