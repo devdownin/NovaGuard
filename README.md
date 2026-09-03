@@ -2,7 +2,7 @@
 
 Caméra de surveillance intelligente, locale et open source. NovaGuard transforme un smartphone Android en caméra de détection de personnes et d'animaux — toute la détection et l'enregistrement restent sur l'appareil, rien n'est envoyé vers un serveur.
 
-[![CI](https://github.com/devdownin/NovaGuard/actions/workflows/ci.yml/badge.svg)](https://github.com/devdownin/NovaGuard/actions/workflows/ci.yml)
+[![CI](https://github.com/devdownin/novaguard/actions/workflows/ci.yml/badge.svg)](https://github.com/devdownin/novaguard/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 ## Fonctionnalités
@@ -39,7 +39,7 @@ Caméra de surveillance intelligente, locale et open source. NovaGuard transform
 Prérequis : suivre le guide [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) de React Native pour Android (JDK, Android Studio/SDK, un émulateur ou un appareil connecté).
 
 ```sh
-git clone https://github.com/devdownin/NovaGuard.git
+git clone https://github.com/devdownin/novaguard.git
 cd NovaGuard
 npm install
 npm run android
