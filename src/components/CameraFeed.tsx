@@ -225,10 +225,24 @@ export function CameraFeed({
         const faces: DetectionBox[] = [];
         if (autoZoom) {
           onFrameStage('faces');
-          const detected = detectFaces(frame);
-          for (let i = 0; i < detected.length; i++) {
-            const b = detected[i].bounds;
-            faces.push({ x: b.x / viewW, y: b.y / viewH, width: b.width / viewW, height: b.height / viewH });
+          // ML Kit failing is not detection failing. Auto-zoom is cosmetic;
+          // seeing a person is what the app is for, and it has already been
+          // done by this point — so a face detector that throws costs the
+          // framing, not the frame. Reported rather than swallowed: at five
+          // frames a second an unreported failure is invisible, and the trace
+          // cannot name it either, since reaching `report` clears the record.
+          // The reported text is identical every frame, so the state update
+          // that carries it bails out and nothing re-renders.
+          try {
+            const detected = detectFaces(frame);
+            for (let i = 0; i < detected.length; i++) {
+              const b = detected[i]?.bounds;
+              if (b == null) continue;
+              faces.push({ x: b.x / viewW, y: b.y / viewH, width: b.width / viewW, height: b.height / viewH });
+            }
+          } catch (e) {
+            const failure = e as { message?: string } | undefined;
+            onFrameError(failure?.message ?? 'erreur inconnue');
           }
         }
 

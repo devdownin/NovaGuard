@@ -289,6 +289,36 @@ describe('the compiled analysis worklet', () => {
     expect(stages).toEqual(['resize', 'inference', 'faces', 'report']);
   });
 
+  it('keeps detecting when the face detector throws', () => {
+    // Auto-zoom is cosmetic and person/animal detection has already run by the
+    // time faces are asked for, so an ML Kit failure must cost the framing and
+    // nothing else. It used to take the whole frame down with it.
+    const closure = closureFor({
+      autoZoom: true,
+      detectFaces: () => { throw new Error('ML Kit down'); },
+    });
+    runAnalysis(closure);
+
+    expect(closure.onJsFrame).toHaveBeenCalled();
+    expect((closure.onJsFrame as jest.Mock).mock.calls[0][1]).toEqual([]);
+    // Reported, not swallowed: at five frames a second, a detector that fails
+    // on every one of them would otherwise leave no trace anywhere.
+    expect(closure.onFrameError).toHaveBeenCalledWith('ML Kit down');
+  });
+
+  it('skips a face the detector returned without bounds', () => {
+    const closure = closureFor({
+      autoZoom: true,
+      detectFaces: () => [{}, { bounds: { x: 32, y: 64, width: 32, height: 64 } }],
+    });
+    runAnalysis(closure);
+
+    expect((closure.onJsFrame as jest.Mock).mock.calls[0][1]).toEqual([
+      { x: 0.1, y: 0.1, width: 0.1, height: 0.1 },
+    ]);
+    expect(closure.onFrameError).not.toHaveBeenCalled();
+  });
+
   it('leaves the stage at the call that threw', () => {
     // The whole point: the last stage named is the one the process was inside.
     const closure = closureFor({
