@@ -190,6 +190,98 @@ describe('worklet closures', () => {
   });
 });
 
+describe('the compiled analysis worklet', () => {
+  /**
+   * The innermost `runAsync` body, pulled straight out of the compiled bundle.
+   *
+   * `CameraFeed` cannot be loaded here — it needs the whole React Native
+   * runtime — but the worklet's source is a plain string in the output, which
+   * is all the runtime itself starts from.
+   */
+  function analysisWorkletSource(): string {
+    const compiled = compile(resolve(ROOT, 'src/components/CameraFeed.tsx'));
+    const bodies: string[] = [];
+    traverse(parse(compiled, { sourceType: 'unambiguous' }), {
+      VariableDeclarator(path) {
+        if (!t.isIdentifier(path.node.id) || !/^_worklet_\d+_init_data$/.test(path.node.id.name)) return;
+        if (!t.isObjectExpression(path.node.init)) return;
+        for (const property of path.node.init.properties) {
+          if (!t.isObjectProperty(property) || !t.isIdentifier(property.key, { name: 'code' })) continue;
+          if (t.isStringLiteral(property.value)) bodies.push(property.value.value);
+        }
+      },
+    });
+    // The one that resizes a frame and never re-enters `runAsync`.
+    const analysis = bodies.filter(body => body.includes('resize(frame') && !body.includes('runAsync('));
+    expect(analysis).toHaveLength(1);
+    return analysis[0];
+  }
+
+  /** A closure with everything the body destructures, and nothing else. */
+  function closureFor(overrides: Record<string, unknown> = {}) {
+    return {
+      resize: () => new Uint8Array(320 * 320 * 3),
+      frame: { width: 1920, height: 1080, orientation: 'portrait' },
+      MODEL_INPUT_SIZE: 320,
+      uprightRotation: () => '0deg',
+      model: { runSync: () => [new Float32Array(4), new Float32Array(1), new Float32Array(1), Float32Array.from([0])] },
+      interpretDetections: () => [],
+      detectPerson: true,
+      detectAnimal: true,
+      minConfidence: 0.75,
+      autoZoom: false,
+      detectFaces: () => [],
+      viewW: 320,
+      viewH: 640,
+      onJsFrame: jest.fn(),
+      uprightAspect: () => 9 / 16,
+      onFrameError: jest.fn(),
+      ...overrides,
+    };
+  }
+
+  function runAnalysis(closure: Record<string, unknown>): void {
+    // eslint-disable-next-line no-new-func
+    const body = new Function(`return (${analysisWorkletSource()})`)();
+    body.apply({ __closure: closure });
+  }
+
+  it('hands a frame it analysed to the JS thread', () => {
+    const closure = closureFor();
+    runAnalysis(closure);
+    expect(closure.onJsFrame).toHaveBeenCalled();
+    expect(closure.onFrameError).not.toHaveBeenCalled();
+  });
+
+  it('reports a failure instead of letting it close the app', () => {
+    // Anything escaping this body reaches VisionCamera's `throwErrorOnJS`,
+    // which calls React Native's `reportFatalError`. One bad frame, no app.
+    const closure = closureFor({
+      resize: () => { throw new Error('Frame is already closed'); },
+    });
+
+    expect(() => runAnalysis(closure)).not.toThrow();
+    expect(closure.onFrameError).toHaveBeenCalledWith('Frame is already closed');
+    expect(closure.onJsFrame).not.toHaveBeenCalled();
+  });
+
+  it('reports a failure from the model too, not just the resize', () => {
+    const closure = closureFor({
+      model: { runSync: () => { throw new Error('delegate produced nothing'); } },
+    });
+
+    expect(() => runAnalysis(closure)).not.toThrow();
+    expect(closure.onFrameError).toHaveBeenCalledWith('delegate produced nothing');
+  });
+
+  it('still says something when what was thrown carries no message', () => {
+    const closure = closureFor({ resize: () => { throw 'a bare string'; } });
+
+    expect(() => runAnalysis(closure)).not.toThrow();
+    expect(closure.onFrameError).toHaveBeenCalledWith('erreur inconnue');
+  });
+});
+
 describe('the compiled detection worklet', () => {
   /**
    * Rebuilds the worklet the way the runtime does: the body is re-evaluated

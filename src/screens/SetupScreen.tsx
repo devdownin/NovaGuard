@@ -71,6 +71,12 @@ export function SetupScreen() {
           <SettingRow label="Zoom auto sur les visages" subtitle="Gros plan 4 s, puis retour sur la personne">
             <Switch value={settings.autoZoom} onValueChange={s.toggleAutoZoom} />
           </SettingRow>
+          <SettingRow
+            label="Détection sur le processeur"
+            subtitle="À essayer si rien n’est jamais détecté : force le calcul sur le CPU"
+          >
+            <Switch value={settings.forceCpu} onValueChange={s.toggleForceCpu} />
+          </SettingRow>
           <View style={styles.subBlock}>
             <Text style={styles.subLabel}>Sensibilité</Text>
             <SegmentedControl

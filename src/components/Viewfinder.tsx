@@ -5,6 +5,7 @@ import { color, font } from '../theme';
 import { useAppState, useViewfinderState } from '../state/AppStateContext';
 import { useAutoZoom } from '../camera/useAutoZoom';
 import { formatDuration } from '../utils/date';
+import { formatFrameRate } from '../camera/frameRate';
 import { GridOverlay } from './GridOverlay';
 import { CameraFeed } from './CameraFeed';
 import { DetectionOverlay } from './DetectionOverlay';
@@ -40,6 +41,20 @@ function ScanBeam() {
 function RecTimer() {
   const { recSec } = useViewfinderState();
   return <Text style={styles.recClock}>{formatDuration(recSec)}</Text>;
+}
+
+/**
+ * The cadence the camera is really analysed at.
+ *
+ * A leaf for the same reason as `RecTimer`: it changes on its own clock, and
+ * making the whole viewfinder re-render for it would undo the split the
+ * provider exists for. Renders nothing until a full averaging window has
+ * closed, so it never shows a figure it has not measured.
+ */
+function FrameRateLabel() {
+  const { frameRate } = useViewfinderState();
+  if (frameRate <= 0) return null;
+  return <Text style={styles.overlayRate}>{formatFrameRate(frameRate)}</Text>;
 }
 
 function RecDot() {
@@ -145,6 +160,9 @@ export function Viewfinder() {
       <View style={styles.overlayChip}>
         <View style={[styles.overlayDot, { backgroundColor: overlayDotColor }]} />
         <Text style={styles.overlayText}>{overlayText}</Text>
+        {/* "Sensibilité" sets a target the device does not have to reach; this
+            is the only place the difference is visible. */}
+        {monitoring && <FrameRateLabel />}
       </View>
 
       {recording && (
@@ -250,6 +268,12 @@ const styles = StyleSheet.create({
     fontFamily: font.regular,
     fontSize: 10.5,
     color: color.neutral200,
+  },
+  overlayRate: {
+    fontFamily: font.regular,
+    fontSize: 10,
+    color: color.neutral500,
+    fontVariant: ['tabular-nums'],
   },
   recChip: {
     position: 'absolute',

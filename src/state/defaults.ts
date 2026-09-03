@@ -9,6 +9,7 @@ export const defaultSettings: Settings = {
   sens: 'Moyenne',
   threshold: 75,
   autoZoom: true,
+  forceCpu: false,
   post: '10 s',
   max: '2 min',
   quality: '1080p',

@@ -64,6 +64,13 @@ tout ça — `babel.config.js` coupe le plugin sous Jest — d'où
 `__tests__/workletSafety.test.ts`, qui compile pour de vrai et inspecte les
 closures.
 
+**Une erreur dans le frame processor tue le processus.** VisionCamera la
+rattrape sur le thread worklet et la repasse à `reportFatalError` : en release,
+une seule mauvaise image ferme l'application. Le corps de l'analyse est donc
+sous `try`, et `frameErrorGuard` rattrape le reste — mais seulement ce qui porte
+la marque de VisionCamera. Élargir ce filtre transformerait chaque vrai plantage
+en application vivante et inerte, ce qui est pire.
+
 **Une nouvelle référence de tableau est un re-rendu.** `confirmedTracksIfChanged`
 existe pour ça : conserver l'identité quand l'incrustation ne changerait pas.
 

@@ -12,6 +12,7 @@ import { uprightAspect, uprightRotation } from '../camera/orientation';
 import { uprightBoxToViewBox } from '../camera/framing';
 import { useDetectionModel } from '../camera/useDetectionModel';
 import { interpretDetections } from '../ml/interpretDetections';
+import { frameErrorMessage } from '../camera/frameErrors';
 import { qualityBitRate, qualityResolution } from '../recording/library';
 import { DetectionBox, FrameDetection } from '../ml/types';
 
@@ -77,7 +78,7 @@ export function CameraFeed({
   const { resize } = useResizePlugin();
   // `failed` used to be computed and thrown away, so a model both delegates
   // refused looked exactly like a working camera that never sees anything.
-  const { model, failed: modelFailed } = useDetectionModel(MODEL);
+  const { model, failed: modelFailed } = useDetectionModel(MODEL, settings.forceCpu);
 
   useEffect(() => {
     if (!onProblem) return;
@@ -128,6 +129,12 @@ export function CameraFeed({
     onFrame(faces, persons);
   }, [reportDetections, onFrame, viewWidth, viewHeight]);
 
+  // Only the text crosses back: an Error object cannot be copied between the
+  // two runtimes, and the worklet holds no `Error` we could hand over anyway.
+  const onFrameError = useRunOnJS((message: string) => {
+    onProblem?.(frameErrorMessage(message));
+  }, [onProblem]);
+
   const targetFps = FPS_BY_SENSITIVITY[settings.sens];
   const detectPerson = settings.person;
   const detectAnimal = settings.animal;
@@ -144,33 +151,44 @@ export function CameraFeed({
       'worklet';
       runAsync(frame, () => {
         'worklet';
-        // Feed the model the WHOLE frame, uprighted. The previous version let
-        // the plugin centre-crop to a square, which threw away the sides of the
-        // field of view, and left the scene rotated for a portrait-held phone.
-        const resized = resize(frame, {
-          crop: { x: 0, y: 0, width: frame.width, height: frame.height },
-          scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
-          rotation: uprightRotation(frame.orientation),
-          pixelFormat: 'rgb',
-          dataType: 'uint8',
-        });
-        // The model's 4 outputs are always float32 (see interpretDetections' doc comment).
-        const outputs = model.runSync([resized]) as Float32Array[];
-        const detections = interpretDetections(outputs, { detectPerson, detectAnimal, minConfidence });
+        // Everything analysis does per frame sits inside this `try`, because
+        // outside it VisionCamera hands whatever escapes to `reportFatalError`
+        // and the app closes. A failing detector is a degraded camera; it must
+        // read as a message in the viewfinder, not as the app disappearing.
+        try {
+          // Feed the model the WHOLE frame, uprighted. The previous version let
+          // the plugin centre-crop to a square, which threw away the sides of the
+          // field of view, and left the scene rotated for a portrait-held phone.
+          const resized = resize(frame, {
+            crop: { x: 0, y: 0, width: frame.width, height: frame.height },
+            scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
+            rotation: uprightRotation(frame.orientation),
+            pixelFormat: 'rgb',
+            dataType: 'uint8',
+          });
+          // The model's 4 outputs are always float32 (see interpretDetections' doc comment).
+          const outputs = model.runSync([resized]) as Float32Array[];
+          const detections = interpretDetections(outputs, { detectPerson, detectAnimal, minConfidence });
 
-        const faces: DetectionBox[] = [];
-        if (autoZoom) {
-          const detected = detectFaces(frame);
-          for (let i = 0; i < detected.length; i++) {
-            const b = detected[i].bounds;
-            faces.push({ x: b.x / viewW, y: b.y / viewH, width: b.width / viewW, height: b.height / viewH });
+          const faces: DetectionBox[] = [];
+          if (autoZoom) {
+            const detected = detectFaces(frame);
+            for (let i = 0; i < detected.length; i++) {
+              const b = detected[i].bounds;
+              faces.push({ x: b.x / viewW, y: b.y / viewH, width: b.width / viewW, height: b.height / viewH });
+            }
           }
-        }
 
-        onJsFrame(detections, faces, uprightAspect(frame.width, frame.height, frame.orientation));
+          onJsFrame(detections, faces, uprightAspect(frame.width, frame.height, frame.orientation));
+        } catch (e) {
+          // Plain property access, no `instanceof`: the worklet runtime is not
+          // the one this value's prototype came from.
+          const failure = e as { message?: string } | undefined;
+          onFrameError(failure?.message ?? 'erreur inconnue');
+        }
       });
     });
-  }, [model, resize, onJsFrame, detectFaces, autoZoom, viewW, viewH, targetFps, detectPerson, detectAnimal, minConfidence]);
+  }, [model, resize, onJsFrame, onFrameError, detectFaces, autoZoom, viewW, viewH, targetFps, detectPerson, detectAnimal, minConfidence]);
 
   if (!perms.cam || device == null) return null;
 

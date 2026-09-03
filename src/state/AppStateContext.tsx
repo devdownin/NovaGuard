@@ -30,6 +30,9 @@ import {
   stopForegroundService,
 } from '../surveillance/foregroundService';
 import { alertContent, shouldAlert } from '../surveillance/alerts';
+import { installFrameErrorGuard } from '../camera/frameErrorGuard';
+import { FRAME_ERROR_PREFIX } from '../camera/frameErrors';
+import { countFrame, EMPTY_FRAME_RATE_WINDOW, FrameRateWindow } from '../camera/frameRate';
 
 interface AppStateValue {
   hydrated: boolean;
@@ -89,6 +92,7 @@ interface AppStateValue {
   togglePerson: () => void;
   toggleAnimal: () => void;
   toggleAutoZoom: () => void;
+  toggleForceCpu: () => void;
   setSensitivity: (s: Sensitivity) => void;
   setThreshold: (v: number) => void;
   cyclePost: () => void;
@@ -132,6 +136,11 @@ export interface ViewfinderState {
   /** Aspect ratio (w/h) of the uprighted camera frame, for mapping boxes onto the preview. */
   frameAspect: number;
   recSec: number;
+  /**
+   * Frames per second the camera is really being analysed at, averaged over
+   * {@link FRAME_RATE_WINDOW_MS}. 0 until the first window closes.
+   */
+  frameRate: number;
 }
 
 /** The setters `reportDetections` drives, handed up by `ViewfinderProvider`. */
@@ -140,6 +149,7 @@ interface ViewfinderSink {
   setPrimaryTrackId: (id: number | null) => void;
   setFrameAspect: (aspect: number) => void;
   setRecSec: (seconds: number) => void;
+  setFrameRate: (framesPerSecond: number) => void;
 }
 
 const AppStateCtx = createContext<AppStateValue | null>(null);
@@ -162,6 +172,7 @@ function ViewfinderProvider({
   const [primaryTrackId, setPrimaryTrackId] = useState<number | null>(null);
   const [frameAspect, setFrameAspect] = useState(9 / 16);
   const [recSec, setRecSec] = useState(0);
+  const [frameRate, setFrameRate] = useState(0);
 
   // `useState` setters are stable, so this is built once and the registration
   // never re-runs. Effects flush child-first, but a frame cannot be processed
@@ -169,7 +180,7 @@ function ViewfinderProvider({
   // one asynchronously — well after this commit — so the sink is always live by
   // the time `reportDetections` fires.
   const setters = useMemo<ViewfinderSink>(
-    () => ({ setTracks, setPrimaryTrackId, setFrameAspect, setRecSec }),
+    () => ({ setTracks, setPrimaryTrackId, setFrameAspect, setRecSec, setFrameRate }),
     [],
   );
   useEffect(() => {
@@ -178,8 +189,8 @@ function ViewfinderProvider({
   }, [setters, sink]);
 
   const value = useMemo<ViewfinderState>(
-    () => ({ tracks, primaryTrackId, frameAspect, recSec }),
-    [tracks, primaryTrackId, frameAspect, recSec],
+    () => ({ tracks, primaryTrackId, frameAspect, recSec, frameRate }),
+    [tracks, primaryTrackId, frameAspect, recSec, frameRate],
   );
 
   return <ViewfinderCtx.Provider value={value}>{children}</ViewfinderCtx.Provider>;
@@ -219,6 +230,13 @@ export const RESUME_ARM_MS = 8000;
  * that is nearly full, so the disk cannot quietly overrun between sweeps.
  */
 export const DISK_SWEEP_MS = 30_000;
+
+/**
+ * Prefixes of the viewfinder messages the camera owns, and may therefore clear
+ * again when it recovers. Anything else there was put up by recording or by the
+ * foreground service and is not the camera's to take down.
+ */
+const CAMERA_OWNED_ERROR = new RegExp(`^(Caméra|Modèle|${FRAME_ERROR_PREFIX})`);
 
 // Sessions now follow the tracker: one opens when a subject is *confirmed*
 // (seen on consecutive frames) and closes when every track has been dropped,
@@ -399,6 +417,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const postRollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** When the last detection alert went out, for the cooldown. */
   const lastAlertRef = useRef<number | null>(null);
+  /** Rolling count behind the measured frame rate. */
+  const frameWindowRef = useRef<FrameRateWindow>({ ...EMPTY_FRAME_RATE_WINDOW });
   /**
    * Last event id minted. Owned here rather than derived from `events[0]`,
    * which would only be the highest id while the list happens to be sorted
@@ -530,6 +550,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   }, [cancelPostRoll, clearSession, commitEvent, sessionMeta, stopRecording]);
 
   const reportDetections = useCallback((detections: FrameDetection[], aspect: number) => {
+    const now = Date.now();
     // Through a ref so this stays a once-per-session write: `setSawFrame` is a
     // stable setter, so arming the resume flag costs the frame path nothing and
     // leaves this callback's identity — and the worklet's — untouched.
@@ -537,9 +558,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       sawFrameRef.current = true;
       setSawFrame(true);
     }
+    // What "Sensibilité" asked for is a target; this is what the device manages.
+    const measured = countFrame(frameWindowRef.current, now);
+    if (measured != null) viewfinder.current?.setFrameRate(measured);
     viewfinder.current?.setFrameAspect(aspect);
 
-    const next = updateTracks(tracksRef.current, detections, Date.now());
+    const next = updateTracks(tracksRef.current, detections, now);
     tracksRef.current = next;
     // Keep the previous array when nothing moved: every other setter here
     // already bails on `Object.is`, so this is what makes a still scene free.
@@ -552,7 +576,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       cancelPostRoll();
       if (sessionKindRef.current == null) {
         sessionKindRef.current = primary.kind;
-        sessionStartRef.current = Date.now();
+        sessionStartRef.current = now;
         sessionMaxConfRef.current = primary.maxConfidence;
         viewfinder.current?.setRecSec(0);
         // Refuse to start on a nearly full volume rather than letting the
@@ -568,7 +592,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         // Alert on the *opening* of a session, not on the event written when it
         // closes: the point of a surveillance alert is that someone is there
         // now, not that someone was there for the last thirty seconds.
-        const now = Date.now();
         if (shouldAlert(settingsRef.current, lastAlertRef.current, now)) {
           lastAlertRef.current = now;
           const { title, body } = alertContent(primary.kind, now);
@@ -576,7 +599,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         }
       } else {
         sessionMaxConfRef.current = Math.max(sessionMaxConfRef.current, primary.maxConfidence);
-        viewfinder.current?.setRecSec(Math.floor((Date.now() - sessionStartRef.current) / 1000));
+        viewfinder.current?.setRecSec(Math.floor((now - sessionStartRef.current) / 1000));
       }
       setDet(primary.kind);
       return;
@@ -602,6 +625,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       viewfinder.current?.setTracks(() => []);
       sawFrameRef.current = false;
       setSawFrame(false);
+      frameWindowRef.current = { ...EMPTY_FRAME_RATE_WINDOW };
+      viewfinder.current?.setFrameRate(0);
       setMonitoring(false);
       return;
     }
@@ -752,6 +777,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const togglePerson = useCallback(() => patchSettings({ person: !settings.person }), [patchSettings, settings.person]);
   const toggleAnimal = useCallback(() => patchSettings({ animal: !settings.animal }), [patchSettings, settings.animal]);
   const toggleAutoZoom = useCallback(() => patchSettings({ autoZoom: !settings.autoZoom }), [patchSettings, settings.autoZoom]);
+  const toggleForceCpu = useCallback(() => patchSettings({ forceCpu: !settings.forceCpu }), [patchSettings, settings.forceCpu]);
   const toggleAutoDel = useCallback(() => patchSettings({ autoDel: !settings.autoDel }), [patchSettings, settings.autoDel]);
   const toggleNotif = useCallback(() => patchSettings({ notif: !settings.notif }), [patchSettings, settings.notif]);
   const toggleNotifDet = useCallback(() => patchSettings({ notifDet: !settings.notifDet }), [patchSettings, settings.notifDet]);
@@ -760,8 +786,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const reportCameraProblem = useCallback((message: string | null) => {
     // Only clears what it set: a camera that recovers must not wipe an unrelated
     // recording or foreground-service message.
-    setRecError(prev => (message ?? (prev && /^(Caméra|Modèle)/.test(prev) ? null : prev)));
+    setRecError(prev => (message ?? (prev && CAMERA_OWNED_ERROR.test(prev) ? null : prev)));
   }, []);
+
+  // A frame-processor error that escapes the worklet's own `try` — a closure the
+  // runtime refuses to copy, say — still reaches React Native's fatal reporter
+  // and closes the app. Downgrade exactly those; everything else keeps crashing.
+  useEffect(() => installFrameErrorGuard(reportCameraProblem), [reportCameraProblem]);
 
   const setSensitivity = useCallback((s: Sensitivity) => patchSettings({ sens: s }), [patchSettings]);
   const setThreshold = useCallback((v: number) => patchSettings({ threshold: v }), [patchSettings]);
@@ -798,7 +829,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     events, filter, setFilter, period, setPeriod, periodOpen, togglePeriodOpen, selected, selectedEvent, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete,
     confirmWipe, askWipe, cancelWipe, doWipe,
-    settings, toggleSection, cycleCamera, toggleResumeOnLaunch, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom,
+    settings, toggleSection, cycleCamera, toggleResumeOnLaunch, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom, toggleForceCpu,
     setSensitivity, setThreshold, cyclePost, cycleMax, cycleQuality, setRetention,
     toggleAutoDel, toggleNotif, toggleNotifDet, openAlertSoundSettings, wipeAllVideos,
     info, openInfo, closeInfo,
@@ -808,7 +839,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     isRecording, recError, store, cameraRef, reportCameraProblem, toggleMonitoring, reportDetections,
     events, filter, period, periodOpen, togglePeriodOpen, selected, selectedEvent, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete, confirmWipe, askWipe, cancelWipe, doWipe,
-    settings, toggleSection, cycleCamera, toggleResumeOnLaunch, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom,
+    settings, toggleSection, cycleCamera, toggleResumeOnLaunch, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom, toggleForceCpu,
     setSensitivity, setThreshold, cyclePost, cycleMax, cycleQuality, setRetention,
     toggleAutoDel, toggleNotif, toggleNotifDet, openAlertSoundSettings, wipeAllVideos,
     info, openInfo, closeInfo, onb, perms, onbNext, onbFinish, grantPermission,
