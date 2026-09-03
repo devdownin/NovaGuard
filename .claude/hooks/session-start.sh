@@ -18,7 +18,14 @@ cd "$CLAUDE_PROJECT_DIR"
 # `install`, not `ci`: the container image is cached once this finishes, and
 # `ci` deletes node_modules first, which throws that cache away every time.
 # The lockfile is still respected — it just is not wiped to start.
-npm install --no-audit --no-fund
+#
+# `--no-save` because it is not respected *quietly* otherwise. The npm in this
+# container is not the one that wrote the lockfile, so a plain `install`
+# rewrites it on the way past — dropping the `libc` fields it does not know and
+# reclassifying `devOptional` as `dev`. Nothing about the dependency tree
+# changes, but the file does, so every session starts dirty and the churn is
+# one careless `git commit -a` away from landing on everyone else.
+npm install --no-save --no-audit --no-fund
 
 # Jest resolves Android platform files and reads day boundaries in local time;
 # both are pinned in jest.config.js, so nothing extra is exported here.
