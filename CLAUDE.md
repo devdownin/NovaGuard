@@ -81,20 +81,37 @@ Node 22). L'image ne contient que les outils ; les sources sont montées.
 
 ```bash
 docker build -t novaguard-android .
-docker run --rm -v "$PWD":/app -w /app novaguard-android \
-  bash -lc 'npm ci && cd android && ./gradlew assembleRelease'
+scripts/build-apk-in-docker.sh novaguard-android
 ```
 
-L'APK sort dans `android/app/build/outputs/apk/release/`. Gradle tourne en root
-par défaut et laissera des répertoires de build appartenant à root sur l'hôte —
-passez `--user "$(id -u):$(id -g)"` avec un HOME accessible en écriture si ça
-vous gêne.
+L'APK sort dans `android/app/build/outputs/apk/release/`.
 
-Le workflow `android-image.yml` reconstruit l'image et **fabrique un APK avec**
-dès qu'un de ces fichiers change : une image qui ne produirait plus rien échoue
-là, pas dans une release des semaines plus tard. Il est dans son propre fichier
-parce que GitHub ne filtre par `paths` qu'au niveau du workflow, et personne ne
-doit payer plusieurs gigaoctets de SDK sur une PR ordinaire.
+Deux scripts, et la raison de la séparation compte :
+
+- `scripts/build-apk.sh` — ce qui transforme le dépôt en APK (`npm ci`, puis
+  `assembleRelease`). Tourne *dans* l'image.
+- `scripts/build-apk-in-docker.sh` — l'invocation `docker run` : montage des
+  sources, caches Gradle et npm, et `--user` pour que Gradle ne laisse pas des
+  répertoires appartenant à root dans votre checkout.
+
+La CI appelle exactement ces deux-là. Un chemin de release que personne
+n'exécute est précisément la façon dont le build d'APK est resté cassé pendant
+onze fusions sans que personne ne le voie : ici, ce que la PR vérifie et ce que
+la release exécute sont la même commande.
+
+L'image est publiée sur `ghcr.io/devdownin/novaguard/android-build`, **étiquetée
+par le hash du `Dockerfile`**. `build-apk` demande l'étiquette que son propre
+commit décrit : une image ne peut donc jamais être décalée du `Dockerfile` avec
+lequel la release est construite. Si l'étiquette n'existe pas encore, le job
+construit l'image sur place — un tag manquant coûte un téléchargement, il ne
+casse pas une release.
+
+`android-image.yml` reconstruit l'image, **vérifie composant par composant**
+qu'ils sont sur le disque (un `docker build` qui sort en zéro ne prouve que
+l'exécution des commandes), fabrique un APK, et ne publie qu'ensuite. Il est
+dans son propre fichier parce que GitHub ne filtre par `paths` qu'au niveau du
+workflow, et personne ne doit payer plusieurs gigaoctets de SDK sur une PR
+ordinaire.
 
 ## Tests
 
