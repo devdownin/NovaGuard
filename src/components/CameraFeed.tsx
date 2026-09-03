@@ -114,7 +114,11 @@ export function CameraFeed({
   // nothing in the library takes it back down; `stopListeners` is the only
   // teardown it exposes. A new plugin instance is built whenever the options
   // above change, so this runs on every one of them, not just on unmount.
-  useEffect(() => faceDetector.stopListeners, [faceDetector]);
+  useEffect(() => {
+    return () => {
+      faceDetector.stopListeners();
+    };
+  }, [faceDetector]);
 
   const onJsFrame = useRunOnJS((
     detections: FrameDetection[],
@@ -156,6 +160,21 @@ export function CameraFeed({
         // and the app closes. A failing detector is a degraded camera; it must
         // read as a message in the viewfinder, not as the app disappearing.
         try {
+          const faces: DetectionBox[] = [];
+          if (autoZoom) {
+            try {
+              const detected = detectFaces(frame);
+              for (let i = 0; i < detected.length; i++) {
+                const b = detected[i]?.bounds;
+                if (b != null) {
+                  faces.push({ x: b.x / viewW, y: b.y / viewH, width: b.width / viewW, height: b.height / viewH });
+                }
+              }
+            } catch {
+              // ML Kit face detection failure on a frame must not break person/animal detection or crash the app.
+            }
+          }
+
           // Feed the model the WHOLE frame, uprighted. The previous version let
           // the plugin centre-crop to a square, which threw away the sides of the
           // field of view, and left the scene rotated for a portrait-held phone.
@@ -169,15 +188,6 @@ export function CameraFeed({
           // The model's 4 outputs are always float32 (see interpretDetections' doc comment).
           const outputs = model.runSync([resized]) as Float32Array[];
           const detections = interpretDetections(outputs, { detectPerson, detectAnimal, minConfidence });
-
-          const faces: DetectionBox[] = [];
-          if (autoZoom) {
-            const detected = detectFaces(frame);
-            for (let i = 0; i < detected.length; i++) {
-              const b = detected[i].bounds;
-              faces.push({ x: b.x / viewW, y: b.y / viewH, width: b.width / viewW, height: b.height / viewH });
-            }
-          }
 
           onJsFrame(detections, faces, uprightAspect(frame.width, frame.height, frame.orientation));
         } catch (e) {
