@@ -292,6 +292,79 @@ it('keeps the clip when the subject leaves while the cut is still in flight', as
  * holding would sit in `pendingRef` forever — and the passage would run on with
  * nothing being written.
  */
+/**
+ * The gap is measured from the two instants the JS side can actually see, and
+ * a measurement that quietly read the wrong pair would be worse than none:
+ * nobody checks a number the app reports about itself.
+ *
+ * Fake timers make the encoder's latency whatever this test says it is, which
+ * is exactly what a real device will not do — so what is pinned here is that
+ * the right interval is being timed, not how long an encoder takes.
+ */
+describe('measuring the window between two clips', () => {
+  /** Lets the encoder take `finalizeMs` to answer the cut, then lands the clip. */
+  async function cutTakingMs(p: Awaited<ReturnType<typeof passage>>, finalizeMs: number) {
+    await p.watch(CAP_MS);
+    await ReactTestRenderer.act(async () => { jest.advanceTimersByTime(finalizeMs); });
+    await p.land('/clips/a.mp4', CAP_MS / 1000);
+  }
+
+  it('times the encoder from the cut, not from the clip landing', async () => {
+    const p = await passage();
+    await cutTakingMs(p, 420);
+
+    expect(p.state.clipGap.samples).toBe(1);
+    // Timed from `stopRecording()` to `onRecordingFinished` — the encoder
+    // closing the file, which is the half we do not control.
+    expect(p.state.clipGap.last!.finalizeMs).toBe(420);
+  });
+
+  it('charges the restart to us, and keeps it out of the encoder half', async () => {
+    const p = await passage();
+    await cutTakingMs(p, 420);
+
+    // Nothing stands between the camera coming free and the next clip opening,
+    // so this half is ~0 here. It is the half a stray `stat()` over the bridge
+    // was found inflating, which is why it is reported separately at all.
+    expect(p.state.clipGap.last!.restartMs).toBe(0);
+    expect(p.state.clipGap.worstMs).toBe(420);
+  });
+
+  it('measures every cut of a long passage', async () => {
+    const p = await passage();
+    await cutTakingMs(p, 300);
+    await p.watch(CAP_MS);
+    await ReactTestRenderer.act(async () => { jest.advanceTimersByTime(500); });
+    await p.land('/clips/b.mp4', CAP_MS / 1000);
+
+    expect(p.state.clipGap.samples).toBe(2);
+    expect(p.state.clipGap.worstMs).toBe(500);
+  });
+
+  it('records nothing when the passage ends rather than continuing', async () => {
+    const p = await passage();
+    // A session closed by the post-roll opens no next clip, so there is no gap
+    // between two clips to measure — counting it would report a window that
+    // never existed.
+    await p.watch(2 * FRAME_MS);
+    await p.idle(dropAfterMs + POST_ROLL_MS + 2 * FRAME_MS);
+    await p.land('/clips/a.mp4', 3);
+
+    expect(p.state.clipGap.samples).toBe(0);
+  });
+
+  it('records nothing when the next clip could not be opened', async () => {
+    const p = await passage();
+    await p.watch(CAP_MS);
+    p.camera.startRecording.mockImplementationOnce(() => { throw new Error('camera busy'); });
+    await p.land('/clips/a.mp4', CAP_MS / 1000);
+
+    // There is no second clip, so the interval has no end. A gap logged here
+    // would be the time until a recording that never started.
+    expect(p.state.clipGap.samples).toBe(0);
+  });
+});
+
 it('still writes the event when the encoder errors on the cut', async () => {
   const p = await passage();
   await p.watch(CAP_MS);

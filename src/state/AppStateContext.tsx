@@ -36,6 +36,7 @@ import {
   FrameStage, isCompleteFrame, isLaterStage, parseStage, stageDiagnosis,
 } from '../camera/frameTrace';
 import { countFrame, EMPTY_FRAME_RATE_WINDOW, FrameRateWindow } from '../camera/frameRate';
+import { ClipGapStats, EMPTY_CLIP_GAP_STATS, recordGap } from '../recording/clipGap';
 
 interface AppStateValue {
   hydrated: boolean;
@@ -54,6 +55,11 @@ interface AppStateValue {
   recording: boolean;
   /** Last recording failure, surfaced in the viewfinder instead of being swallowed. */
   recError: string | null;
+  /**
+   * Measured cost of a duration-cap cut, this session. Only a device can
+   * answer this — see `clipGap.ts` — so the app measures itself.
+   */
+  clipGap: ClipGapStats;
   storage: StorageInfo;
   /** Passed down to the Camera so the recorder can drive it. */
   cameraRef: React.RefObject<VisionCamera | null>;
@@ -265,6 +271,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [lastDet, setLastDet] = useState(defaultLastDet);
   const [recError, setRecError] = useState<string | null>(null);
   const [volume, setVolume] = useState<VolumeSpace>({ free: 0, total: 0 });
+  // Changes only at a cap boundary — minutes apart — so it costs the frame path
+  // nothing to hold it in ordinary state.
+  const [clipGap, setClipGap] = useState<ClipGapStats>(EMPTY_CLIP_GAP_STATS);
 
   const [events, setEvents] = useState<DetectionEvent[]>(defaultEvents);
   const [filter, setFilter] = useState<HistoryFilter>('Toutes');
@@ -473,6 +482,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
    */
   const startRecordingRef = useRef<() => boolean>(() => false);
   const stopRecordingRef = useRef<() => boolean>(() => false);
+  /** When the cap issued its stop, so the gap that follows can be measured. */
+  const cutAtRef = useRef<number | null>(null);
 
   /**
    * Whether the volume can hold the clip that is about to be written.
@@ -537,16 +548,18 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
    * would go to disk nowhere. Closing the session instead hands the next frame
    * a clean slate to reopen from.
    */
-  const openNextSegment = useCallback(() => {
+  const openNextSegment = useCallback((): boolean => {
     // A long passage fills the disk like any other write. Closing the session
     // hands the next frame back to the ordinary opening path, which is the one
     // place that decides what a refusal looks like.
     if (!hasRoomToRecord()) {
       setRecError('Espace insuffisant pour enregistrer');
       clearSession();
-      return;
+      return false;
     }
-    if (!startRecordingRef.current()) clearSession();
+    if (startRecordingRef.current()) return true;
+    clearSession();
+    return false;
   }, [clearSession, hasRoomToRecord]);
 
   /**
@@ -596,7 +609,19 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
    */
   const onEncoderFree = useCallback(() => {
     const pending = pendingRef.current;
-    if (pending?.rollover && sessionKindRef.current != null) openNextSegment();
+    const cutAt = cutAtRef.current;
+    cutAtRef.current = null;
+    if (!(pending?.rollover && sessionKindRef.current != null)) return;
+
+    // Both readings are taken around the call itself, so nothing between them
+    // is anything but the work being measured.
+    const freeAt = Date.now();
+    const opened = openNextSegment();
+    if (cutAt == null || !opened) return;
+    setClipGap(previous => recordGap(previous, {
+      finalizeMs: freeAt - cutAt,
+      restartMs: Date.now() - freeAt,
+    }));
   }, [openNextSegment]);
 
   /**
@@ -631,7 +656,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     const meta = sessionMeta();
     // Nothing was actually being written (no permission, disk full): there is no
     // clip to close, so there is nothing to roll over to either.
+    const cutAt = Date.now();
     if (!stopRecordingRef.current()) return;
+    cutAtRef.current = cutAt;
     pendingRef.current = { ...meta, rollover: true };
     // The next clip's window starts now. Confidence restarts from whatever is in
     // frame at this instant so each event describes its own clip.
@@ -999,7 +1026,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     hydrated,
     tab, setTab,
     monitoring, det, detToday, lastDet,
-    recording: isRecording, recError, storage: store, cameraRef, reportCameraProblem, reportFrameStage,
+    recording: isRecording, recError, clipGap, storage: store, cameraRef, reportCameraProblem, reportFrameStage,
     toggleMonitoring, reportDetections,
     events, filter, setFilter, period, setPeriod, periodOpen, togglePeriodOpen, selected, selectedEvent, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete,
@@ -1011,7 +1038,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     onb, perms, onbNext, onbFinish, grantPermission,
   }), [
     hydrated, tab, monitoring, det, detToday, lastDet,
-    isRecording, recError, store, cameraRef, reportCameraProblem, reportFrameStage, toggleMonitoring, reportDetections,
+    isRecording, recError, clipGap, store, cameraRef, reportCameraProblem, reportFrameStage, toggleMonitoring, reportDetections,
     events, filter, period, periodOpen, togglePeriodOpen, selected, selectedEvent, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete, confirmWipe, askWipe, cancelWipe, doWipe,
     settings, toggleSection, cycleCamera, toggleResumeOnLaunch, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom, toggleForceCpu,

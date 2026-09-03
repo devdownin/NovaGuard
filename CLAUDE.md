@@ -104,8 +104,14 @@ Il peut en revanche être élargi par accident, et il l'était : la taille du cl
 natif à une fenêtre où rien n'est enregistré. D'où `onEncoderFree`, annoncé dans
 `onRecordingFinished` avant le `stat()`, distinct de `onClip` qui a besoin du
 compte d'octets. Tout ce qu'on ajoute entre la fin d'un clip et le début du
-suivant se paie en images perdues ; la mesure réelle sur appareil n'a jamais été
-faite.
+suivant se paie en images perdues. L'application se mesure donc elle-même
+(`clipGap.ts`, affiché dans Setup → À propos) : seul un appareil peut répondre,
+un faux timer ne dit rien d'un encodeur. Les deux moitiés sont rapportées
+séparément parce qu'elles n'appellent pas le même travail — la finalisation
+appartient à VisionCamera, la relance est à nous. Ni l'une ni l'autre borne
+n'est l'instant où le capteur cesse ou reprend de livrer des images, que rien
+en JS ne peut voir : la somme encadre cette fenêtre, elle ne l'égale pas, et
+c'est ainsi qu'elle est présentée.
 
 **Le garde-fou d'espace disque doit tourner à chaque clip, pas à chaque
 session.** Il ne s'exécutait qu'à l'ouverture d'une session, ce qui suffisait
