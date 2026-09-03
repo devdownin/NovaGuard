@@ -104,11 +104,15 @@ exactement ce que `android/build.gradle` épingle, et rien d'autre : un module
 qui demande autre chose fait tenter à AGP un téléchargement dans un SDK en
 lecture seule, et ça s'arrête là. Deux cas déjà présents — `worklets-core` ne
 déclare aucun `ndkVersion` (AGP retombe sur le sien), le détecteur de visages
-code en dur NDK 27.3, plateforme 35, build-tools 35. Le bloc `subprojects` de
-`android/build.gradle` force les trois valeurs sur **tous** les modules Android
+code en dur NDK 27.3/plateforme 35/build-tools 35, et **aucun** module natif ne
+fixe de version de CMake, donc tous héritent du défaut d'AGP (3.22.1) au lieu du
+3.30.5 que l'image installe. Et ça ne casse pas d'un coup : se mettre d'accord
+sur le NDK n'a fait avancer le build que jusqu'à `configureCMake…`. Le bloc
+`subprojects` de `android/build.gradle` force les quatre valeurs sur **tous** les
+modules Android
 plutôt que de les poursuivre un par un, et `__tests__/toolchainPinning.test.ts`
 vérifie que `build.gradle`, le `Dockerfile` et les assertions d'`android-image.yml`
-nomment bien les mêmes versions — l'échec, lui, ne se voit que dans un vrai run
+nomment bien les mêmes versions pour chacune des quatre — l'échec, lui, ne se voit que dans un vrai run
 Gradle, que la CI ne fait pas sur une PR ordinaire.
 
 ## Construire l'APK

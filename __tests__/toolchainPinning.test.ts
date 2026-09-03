@@ -13,6 +13,10 @@
  *     Failed to install: ndk;27.0.12077973
  *     The SDK directory is not writable (/opt/android-sdk)
  *
+ * It also does not fail all at once: agreeing on the NDK only got the build as
+ * far as `cmake;3.22.1`. Every component the image installs is checked here,
+ * so the next one is not found one CI run at a time.
+ *
  * That failure surfaces only in a real Gradle run, which no pull request does.
  * Comparing three strings does, in a millisecond. To watch it fail, bump the
  * NDK in `android/build.gradle` and leave the Dockerfile alone.
@@ -61,11 +65,14 @@ describe('the Android toolchain is pinned in one place at a time', () => {
     expect(read(WORKFLOW)).toContain(`$ANDROID_HOME/platforms/android-${wanted}`);
   });
 
-  it('asserts the CMake it installed', () => {
-    // No Gradle-side pin for this one — the RN plugin requests it — so the
-    // image and the assertion that guards it are checked against each other.
-    const inImage = extract(DOCKERFILE, /ARG ANDROID_CMAKE=(\S+)/);
-    expect(read(WORKFLOW)).toContain(`$ANDROID_HOME/cmake/${inImage}`);
+  it('installs the CMake the build asks for', () => {
+    // This one has no natural Gradle-side pin — no native module sets a CMake
+    // version, so they all inherit AGP's default — which is precisely why the
+    // root script forces one, and why it belongs here with the rest.
+    const wanted = extract(GRADLE, /cmakeVersion\s*=\s*"([^"]+)"/);
+
+    expect(extract(DOCKERFILE, /ARG ANDROID_CMAKE=(\S+)/)).toBe(wanted);
+    expect(read(WORKFLOW)).toContain(`$ANDROID_HOME/cmake/${wanted}`);
   });
 
   it('holds every Android module to that toolchain, not just ours', () => {
@@ -76,7 +83,14 @@ describe('the Android toolchain is pinned in one place at a time', () => {
     // pinning the image correctly is not enough.
     const gradle = read(GRADLE);
     expect(gradle).toMatch(/subprojects\s*\{/);
-    for (const property of ['compileSdk', 'buildToolsVersion', 'ndkVersion']) {
+    for (const property of [
+      'compileSdk',
+      'buildToolsVersion',
+      'ndkVersion',
+      // Dropping this one gets you a build that agrees on the NDK and then
+      // fails at `configureCMake…` instead — one component further along.
+      'externalNativeBuild.cmake.version',
+    ]) {
       expect(gradle).toContain(`androidExtension.${property} = rootProject.ext.`);
     }
   });
