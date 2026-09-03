@@ -197,26 +197,52 @@ export function CameraFeed({
     // own frame rate.
     runAtTargetFps(targetFps, () => {
       'worklet';
-      runAsync(frame, () => {
-        'worklet';
-        // Everything analysis does per frame sits inside this `try`, because
-        // outside it VisionCamera hands whatever escapes to `reportFatalError`
-        // and the app closes. A failing detector is a degraded camera; it must
-        // read as a message in the viewfinder, not as the app disappearing.
-        try {
-          const faces: DetectionBox[] = [];
-          if (autoZoom) {
-            try {
-              const detected = detectFaces(frame);
-              for (let i = 0; i < detected.length; i++) {
-                const b = detected[i]?.bounds;
-                if (b != null) {
-                  faces.push({ x: b.x / viewW, y: b.y / viewH, width: b.width / viewW, height: b.height / viewH });
-                }
-              }
-            } catch {
-              // ML Kit face detection failure on a frame must not break person/animal detection or crash the app.
+      // Everything analysis does per frame sits inside this `try`, because
+      // outside it VisionCamera hands whatever escapes to `reportFatalError`
+      // and the app closes. A failing detector is a degraded camera; it must
+      // read as a message in the viewfinder, not as the app disappearing.
+      try {
+        // Each `onFrameStage` names the call that comes next, never the one
+        // that just finished: libyuv, LiteRT and ML Kit can all end the
+        // process outright, and a record of the last thing that worked names
+        // everything except the culprit.
+        onFrameStage('resize');
+        // Feed the model the WHOLE frame, uprighted. The previous version let
+        // the plugin centre-crop to a square, which threw away the sides of the
+        // field of view, and left the scene rotated for a portrait-held phone.
+        const resized = resize(frame, {
+          crop: { x: 0, y: 0, width: frame.width, height: frame.height },
+          scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
+          rotation: uprightRotation(frame.orientation),
+          pixelFormat: 'rgb',
+          dataType: 'uint8',
+        });
+        onFrameStage('inference');
+        // The model's 4 outputs are always float32 (see interpretDetections' doc comment).
+        const outputs = model.runSync([resized]) as Float32Array[];
+        const detections = interpretDetections(outputs, { detectPerson, detectAnimal, minConfidence });
+
+        const faces: DetectionBox[] = [];
+        if (autoZoom) {
+          onFrameStage('faces');
+          // ML Kit failing is not detection failing. Auto-zoom is cosmetic;
+          // seeing a person is what the app is for, and it has already been
+          // done by this point — so a face detector that throws costs the
+          // framing, not the frame. Reported rather than swallowed: at five
+          // frames a second an unreported failure is invisible, and the trace
+          // cannot name it either, since reaching `report` clears the record.
+          // The reported text is identical every frame, so the state update
+          // that carries it bails out and nothing re-renders.
+          try {
+            const detected = detectFaces(frame);
+            for (let i = 0; i < detected.length; i++) {
+              const b = detected[i]?.bounds;
+              if (b == null) continue;
+              faces.push({ x: b.x / viewW, y: b.y / viewH, width: b.width / viewW, height: b.height / viewH });
             }
+          } catch (e) {
+            const failure = e as { message?: string } | undefined;
+            onFrameError(failure?.message ?? 'erreur inconnue');
           }
 
           // Feed the model the WHOLE frame, uprighted. The previous version let
