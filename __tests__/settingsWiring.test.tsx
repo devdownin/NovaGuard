@@ -57,6 +57,7 @@ it('writes each control back to disk', async () => {
     state.togglePerson();
     state.toggleAnimal();
     state.toggleAutoZoom();
+    state.toggleForceCpu();
     state.toggleAutoDel();
     state.toggleNotif();
     state.toggleNotifDet();
@@ -74,6 +75,7 @@ it('writes each control back to disk', async () => {
     person: !defaultSettings.person,
     animal: !defaultSettings.animal,
     autoZoom: !defaultSettings.autoZoom,
+    forceCpu: !defaultSettings.forceCpu,
     autoDel: !defaultSettings.autoDel,
     notif: !defaultSettings.notif,
     notifDet: !defaultSettings.notifDet,

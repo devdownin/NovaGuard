@@ -64,12 +64,26 @@ tout ça — `babel.config.js` coupe le plugin sous Jest — d'où
 `__tests__/workletSafety.test.ts`, qui compile pour de vrai et inspecte les
 closures.
 
+**Une erreur dans le frame processor tue le processus.** VisionCamera la
+rattrape sur le thread worklet et la repasse à `reportFatalError` : en release,
+une seule mauvaise image ferme l'application. Le corps de l'analyse est donc
+sous `try`, et `frameErrorGuard` rattrape le reste — mais seulement ce qui porte
+la marque de VisionCamera. Élargir ce filtre transformerait chaque vrai plantage
+en application vivante et inerte, ce qui est pire.
+
 **Une nouvelle référence de tableau est un re-rendu.** `confirmedTracksIfChanged`
 existe pour ça : conserver l'identité quand l'incrustation ne changerait pas.
 
 **Un clip sans événement est une vidéo perdue.** Le sort d'un enregistrement est
 exhaustif (`clipOutcome`) : rattaché, gardé comme événement sans fichier, ou
 supprimé. Il n'y a pas de quatrième issue, et il ne doit pas y en avoir.
+
+**Une lecture qui échoue n'est pas une valeur vide.** Le balayage de démarrage
+supprime tout clip que plus aucun évènement ne réclame ; un chargeur qui répond
+`null` pour « illisible » comme pour « jamais écrit » lui fait donc effacer
+toute la bibliothèque. Ce qui peut détruire quelque chose lit à travers
+`readJsonChecked` et s'abstient quand `ok` est faux — sans réécrire non plus la
+clé qu'il n'a pas su lire.
 
 **Les frontières de jour se calculent en jours calendaires**, via
 `startOfDayBefore`. Soustraire 86 400 000 ms décale d'une heure aux changements

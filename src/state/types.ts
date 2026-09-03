@@ -81,6 +81,14 @@ export interface Settings {
   threshold: number;
   /** Cinematic auto-zoom: ease in on a detected face, hold, then pull back to the whole person. */
   autoZoom: boolean;
+  /**
+   * Run the detection model on the CPU, skipping the GPU delegate.
+   *
+   * A diagnostic, not a preference: the automatic fallback only catches a GPU
+   * delegate that refuses to load the model, and one that loads it and then
+   * returns nothing is indistinguishable from an empty room.
+   */
+  forceCpu: boolean;
   post: PostRoll;
   max: MaxDuration;
   quality: Quality;

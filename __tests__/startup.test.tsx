@@ -52,7 +52,9 @@ async function finishBoot(renderer: ReactTestRenderer.ReactTestRenderer) {
 const mock = tflite as unknown as {
   __reset: () => void;
   __setResolver: (fn: (source: unknown, delegate: string) => unknown) => void;
+  __calls: () => { source: unknown; delegate: string }[];
 };
+const mockCalls = () => mock.__calls();
 
 beforeEach(async () => {
   await AsyncStorage.clear();
@@ -176,21 +178,24 @@ describe('cold start', () => {
 
 describe('detection model loading', () => {
   function harnessFor(container: { value?: ReturnType<typeof useDetectionModel> }) {
-    return function Harness() {
-      container.value = useDetectionModel(MODEL);
+    return function Harness({ forceCpu = false }: { forceCpu?: boolean }) {
+      container.value = useDetectionModel(MODEL, forceCpu);
       return null;
     };
   }
 
-  async function loadModel() {
+  async function loadModel(forceCpu = false) {
     const container: { value?: ReturnType<typeof useDetectionModel> } = {};
     const Harness = harnessFor(container);
     let renderer!: ReactTestRenderer.ReactTestRenderer;
     await ReactTestRenderer.act(async () => {
-      renderer = ReactTestRenderer.create(<Harness />);
+      renderer = ReactTestRenderer.create(<Harness forceCpu={forceCpu} />);
     });
     await ReactTestRenderer.act(async () => {});
-    return { container, renderer };
+    const setForceCpu = async (next: boolean) => {
+      await ReactTestRenderer.act(async () => { renderer.update(<Harness forceCpu={next} />); });
+    };
+    return { container, renderer, setForceCpu };
   }
 
   it('bundles the model as an asset Metro can resolve', () => {
@@ -232,5 +237,41 @@ describe('detection model loading', () => {
     const { container } = await loadModel();
     expect(container.value?.failed).toBe(true);
     expect(container.value?.model).toBeUndefined();
+  });
+
+  describe('forcing the CPU from Setup', () => {
+    // The automatic fallback only catches a GPU delegate that refuses to load
+    // the model. One that loads it and then returns nothing usable looks
+    // exactly like a camera that never sees anybody — this is what makes the
+    // two distinguishable on a device, so it has to actually reach the plugin.
+    it('never asks for the GPU delegate at all', async () => {
+      mock.__setResolver(() => ({ state: 'loaded', model: { runSync: jest.fn() } }));
+      const { container } = await loadModel(true);
+
+      expect(container.value?.delegate).toBe('default');
+      expect(mockCalls().map(c => c.delegate)).not.toContain('android-gpu');
+    });
+
+    it('gives the GPU another go when the switch is turned back off', async () => {
+      // Stored as "we fell back", this could never be undone: one flick of the
+      // switch would have pinned the session to the CPU for good.
+      mock.__setResolver(() => ({ state: 'loaded', model: { runSync: jest.fn() } }));
+      const { container, setForceCpu } = await loadModel(true);
+      await setForceCpu(false);
+
+      expect(container.value?.delegate).toBe('android-gpu');
+    });
+
+    it('does not re-ask a GPU that already refused', async () => {
+      mock.__setResolver((_source, delegate) => (delegate === 'android-gpu'
+        ? { state: 'error', error: new Error('delegate refused') }
+        : { state: 'loaded', model: { runSync: jest.fn() } }));
+      const { container, setForceCpu } = await loadModel();
+      expect(container.value?.delegate).toBe('default');
+
+      await setForceCpu(true);
+      await setForceCpu(false);
+      expect(container.value?.delegate).toBe('default');
+    });
   });
 });

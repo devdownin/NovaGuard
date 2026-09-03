@@ -33,11 +33,24 @@ export async function dropStaleKeys(): Promise<void> {
 }
 
 async function readJson<T>(key: string): Promise<T | null> {
+  return (await readJsonChecked<T>(key)).value;
+}
+
+/**
+ * A read that says whether it worked.
+ *
+ * `readJson` collapses "never written" and "could not be read" into the same
+ * `null`, which is fine for a setting — the default takes over — and dangerous
+ * for the event list: the startup sweep deletes every clip on disk that no
+ * event points at, so an unreadable history reads as an empty one and takes
+ * the user's recordings with it. Callers that can destroy something use this.
+ */
+async function readJsonChecked<T>(key: string): Promise<{ ok: boolean; value: T | null }> {
   try {
     const raw = await AsyncStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : null;
+    return { ok: true, value: raw ? (JSON.parse(raw) as T) : null };
   } catch {
-    return null;
+    return { ok: false, value: null };
   }
 }
 
@@ -53,7 +66,11 @@ export const storage = {
   loadSettings: () => readJson<Settings>(KEYS.settings),
   saveSettings: (v: Settings) => writeJson(KEYS.settings, v),
 
-  loadEvents: () => readJson<DetectionEvent[]>(KEYS.events),
+  /**
+   * `ok` is false when the key exists but could not be read or parsed. Nothing
+   * may be deleted or overwritten on that answer — see `readJsonChecked`.
+   */
+  loadEvents: () => readJsonChecked<DetectionEvent[]>(KEYS.events),
   saveEvents: (v: DetectionEvent[]) => writeJson(KEYS.events, v),
 
   loadDetToday: () => readJson<DayCount>(KEYS.detToday),
