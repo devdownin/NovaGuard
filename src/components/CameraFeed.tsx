@@ -244,6 +244,27 @@ export function CameraFeed({
             const failure = e as { message?: string } | undefined;
             onFrameError(failure?.message ?? 'erreur inconnue');
           }
+
+          // Feed the model the WHOLE frame, uprighted. The previous version let
+          // the plugin centre-crop to a square, which threw away the sides of the
+          // field of view, and left the scene rotated for a portrait-held phone.
+          const resized = resize(frame, {
+            crop: { x: 0, y: 0, width: frame.width, height: frame.height },
+            scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
+            rotation: uprightRotation(frame.orientation),
+            pixelFormat: 'rgb',
+            dataType: 'uint8',
+          });
+          // The model's 4 outputs are always float32 (see interpretDetections' doc comment).
+          const outputs = model.runSync([resized]) as Float32Array[];
+          const detections = interpretDetections(outputs, { detectPerson, detectAnimal, minConfidence });
+
+          onJsFrame(detections, faces, uprightAspect(frame.width, frame.height, frame.orientation));
+        } catch (e) {
+          // Plain property access, no `instanceof`: the worklet runtime is not
+          // the one this value's prototype came from.
+          const failure = e as { message?: string } | undefined;
+          onFrameError(failure?.message ?? 'erreur inconnue');
         }
 
         onFrameStage('report');
