@@ -15,6 +15,20 @@ module.exports = {
     // Bundled TFLite model — treat it like RN's other binary assets under Jest.
     '^.+\\.tflite$': require.resolve('react-native/jest/assetFileTransformer.js'),
   },
+  /**
+   * Jest's default is 5 s, which is a hang guard here and nothing more: no
+   * assertion in this suite measures elapsed time — everything that depends on
+   * a clock drives fake timers, which cost no wall clock at all.
+   *
+   * 5 s was nonetheless too tight on a loaded CI runner. The suites that mount
+   * `AppStateProvider` with the viewfinder take under a second on an idle
+   * machine, but two cores shared between twenty-five suites — one of which
+   * runs the real Babel worklets compiler — stretched that past the limit and
+   * failed a test that asserts an object identity. Raising the guard costs a
+   * genuine hang a few extra seconds to report; leaving it there costs a red
+   * build on a green tree, which is far more expensive.
+   */
+  testTimeout: 30_000,
   transformIgnorePatterns: [
     'node_modules/(?!(@react-native|react-native|@react-native-async-storage|react-native-svg|react-native-linear-gradient|@react-native-community)/)',
   ],
