@@ -13,7 +13,7 @@ import ReactTestRenderer from 'react-test-renderer';
 import { useCameraPermission } from 'react-native-vision-camera';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { RESUME_ARM_MS } from '../src/state/AppStateContext';
-import { mountProvider } from '../testing/mountProvider';
+import { AppState, mountProvider } from '../testing/mountProvider';
 import { startForegroundService } from '../src/surveillance/foregroundService';
 
 jest.mock('../src/surveillance/foregroundService');
@@ -80,34 +80,86 @@ describe('remembering that surveillance was on', () => {
     permission.mockReturnValue({ hasPermission: true, requestPermission });
   });
 
+  /** What the frame processor calls once the camera is really running. */
+  const deliverFrame = (box: { state: { reportDetections: AppState['reportDetections'] } }) =>
+    ReactTestRenderer.act(() => { box.state.reportDetections([], 9 / 16); });
+
   it('does not remember a start that has not survived yet', async () => {
     // The trap this avoids: a crash during startup persists "on", the next
     // launch auto-resumes because of it, and the app dies again before anyone
     // can reach the setting that would stop it.
     const box = await mount();
     await ReactTestRenderer.act(async () => { box.state.toggleMonitoring(); });
+    await deliverFrame(box);
     await ReactTestRenderer.act(async () => {
       jest.advanceTimersByTime(RESUME_ARM_MS - 500);
     });
     await expect(stored()).resolves.not.toBe('true');
   });
 
+  it('never arms a session the camera never delivered a frame for', async () => {
+    // A start that dies before its first frame — no device, a refused model, a
+    // worklet that throws — must not ask to be replayed at the next launch. The
+    // countdown used to run on wall-clock time alone, so it armed anyway.
+    const box = await mount();
+    await ReactTestRenderer.act(async () => { box.state.toggleMonitoring(); });
+    await ReactTestRenderer.act(async () => {
+      jest.advanceTimersByTime(RESUME_ARM_MS * 2);
+    });
+    // The periodic disk sweep rides the same clock; let it settle.
+    await ReactTestRenderer.act(async () => {});
+    await expect(stored()).resolves.not.toBe('true');
+  });
+
   it('remembers it once it has run long enough to be worth resuming', async () => {
     const box = await mount();
     await ReactTestRenderer.act(async () => { box.state.toggleMonitoring(); });
+    await deliverFrame(box);
     await ReactTestRenderer.act(async () => {
       jest.advanceTimersByTime(RESUME_ARM_MS + 100);
     });
     await expect(stored()).resolves.toBe('true');
   });
 
+  it('counts from the first frame, not from the tap', async () => {
+    const box = await mount();
+    await ReactTestRenderer.act(async () => { box.state.toggleMonitoring(); });
+    // The camera takes a while to come up; that time must not count.
+    await ReactTestRenderer.act(async () => {
+      jest.advanceTimersByTime(RESUME_ARM_MS - 200);
+    });
+    await deliverFrame(box);
+    await ReactTestRenderer.act(async () => {
+      jest.advanceTimersByTime(RESUME_ARM_MS - 200);
+    });
+    await expect(stored()).resolves.not.toBe('true');
+
+    await ReactTestRenderer.act(async () => { jest.advanceTimersByTime(400); });
+    await expect(stored()).resolves.toBe('true');
+  });
+
   it('forgets it immediately when surveillance is stopped', async () => {
     const box = await mount();
     await ReactTestRenderer.act(async () => { box.state.toggleMonitoring(); });
+    await deliverFrame(box);
     await ReactTestRenderer.act(async () => {
       jest.advanceTimersByTime(RESUME_ARM_MS + 100);
     });
     await ReactTestRenderer.act(async () => { box.state.toggleMonitoring(); });
+    await ReactTestRenderer.act(async () => {});
+    await expect(stored()).resolves.toBe('false');
+  });
+
+  it('makes a restarted session earn its arming again', async () => {
+    const box = await mount();
+    await ReactTestRenderer.act(async () => { box.state.toggleMonitoring(); });
+    await deliverFrame(box);
+    await ReactTestRenderer.act(async () => { jest.advanceTimersByTime(RESUME_ARM_MS + 100); });
+    await ReactTestRenderer.act(async () => { box.state.toggleMonitoring(); });
+    await ReactTestRenderer.act(async () => {});
+
+    await ReactTestRenderer.act(async () => { box.state.toggleMonitoring(); });
+    await ReactTestRenderer.act(async () => { jest.advanceTimersByTime(RESUME_ARM_MS * 2); });
     await ReactTestRenderer.act(async () => {});
     await expect(stored()).resolves.toBe('false');
   });

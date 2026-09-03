@@ -13,7 +13,7 @@ import React, { useRef } from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 import type { Camera } from 'react-native-vision-camera';
 import * as fs from '@dr.pogodin/react-native-fs';
-import { Clip, useRecorder } from '../src/recording/useRecorder';
+import { Clip, FINALIZE_TIMEOUT_MS, useRecorder } from '../src/recording/useRecorder';
 import { MaxDuration } from '../src/state/types';
 import { maxDurationMs } from '../src/recording/library';
 
@@ -258,4 +258,58 @@ it('reports an unusable recordings directory rather than failing silently', asyn
   expect(onError).toHaveBeenCalledWith("Dossier d'enregistrement inaccessible");
   // And it must not pretend it can record.
   await ReactTestRenderer.act(async () => { expect(h.recorder.start()).toBe(false); });
+});
+
+describe('a stop that is still in flight', () => {
+  it('stays "recording" so the camera session is not torn down under the clip', async () => {
+    const camera = fakeCamera();
+    const h = await mount(camera);
+
+    await ReactTestRenderer.act(async () => { h.recorder.start(); });
+    await ReactTestRenderer.act(async () => { h.recorder.stop(); });
+
+    // The viewfinder passes `active={monitoring || recording}`: dropping this
+    // flag before the encoder answers closes the capture session while the file
+    // is still being finalised.
+    expect(h.recorder.isRecording).toBe(true);
+
+    await ReactTestRenderer.act(async () => {
+      camera.last().onRecordingFinished({ path: '/clips/a.mp4', duration: 3 });
+    });
+    expect(h.recorder.isRecording).toBe(false);
+  });
+
+  it('is not stopped a second time when monitoring goes off', async () => {
+    const camera = fakeCamera();
+    const h = await mount(camera);
+
+    await ReactTestRenderer.act(async () => { h.recorder.start(); });
+    await ReactTestRenderer.act(async () => { h.recorder.stop(); });
+    // The provider stops the session and then drops `enabled` in the same turn.
+    await h.rerender({ enabled: false, max: '1 min' });
+
+    // The second call throws inside VisionCamera, and the old code read that
+    // throw as "nothing was recording" — clearing the flag mid-finalisation.
+    expect(camera.stopRecording).toHaveBeenCalledTimes(1);
+    expect(h.recorder.isRecording).toBe(true);
+  });
+
+  it('releases the camera anyway if the encoder never answers', async () => {
+    const camera = fakeCamera();
+    const h = await mount(camera);
+
+    await ReactTestRenderer.act(async () => { h.recorder.start(); });
+    await ReactTestRenderer.act(async () => { h.recorder.stop(); });
+
+    await ReactTestRenderer.act(async () => {
+      jest.advanceTimersByTime(FINALIZE_TIMEOUT_MS - 1);
+    });
+    expect(h.recorder.isRecording).toBe(true);
+
+    // Otherwise a callback that never lands leaves the preview running with
+    // surveillance switched off, and no way back.
+    await ReactTestRenderer.act(async () => { jest.advanceTimersByTime(1); });
+    expect(h.recorder.isRecording).toBe(false);
+    await ReactTestRenderer.act(async () => { expect(h.recorder.start()).toBe(true); });
+  });
 });

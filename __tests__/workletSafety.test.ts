@@ -28,8 +28,8 @@
 // Node's own types are not in the project's `types` list (React Native's config
 // keeps it to `jest`); this file genuinely runs Babel over files on disk.
 
-import { existsSync, readFileSync } from 'fs';
-import { basename, dirname, resolve } from 'path';
+import { existsSync, readdirSync, readFileSync } from 'fs';
+import { basename, dirname, join, resolve } from 'path';
 import { transformSync } from '@babel/core';
 import { parse } from '@babel/parser';
 import traverse from '@babel/traverse';
@@ -117,17 +117,42 @@ function resolveModule(path: string): string {
   throw new Error(`Cannot resolve ${path}`);
 }
 
-const CAMERA_FEED = resolve(ROOT, 'src/components/CameraFeed.tsx');
+/**
+ * Every source file that declares a worklet, found rather than listed.
+ *
+ * A hardcoded list only protects the files someone remembered to add, which is
+ * no protection at all for the next worklet: the two crashes this suite exists
+ * for were both in code nobody thought needed checking.
+ */
+function worklettedSources(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return worklettedSources(path);
+    if (!/\.tsx?$/.test(entry.name)) return [];
+    return /'worklet'/.test(readFileSync(path, 'utf8')) ? [path] : [];
+  });
+}
+
+const WORKLET_SOURCES = worklettedSources(resolve(ROOT, 'src'));
 const INTERPRET = resolve(ROOT, 'src/ml/interpretDetections.ts');
 const ORIENTATION = resolve(ROOT, 'src/camera/orientation.ts');
 
 describe('worklet closures', () => {
+  it('covers every file that declares one', () => {
+    // Guards the discovery itself: a `src` layout change that stopped finding
+    // the frame processor would otherwise leave this whole suite passing on
+    // nothing at all.
+    expect(WORKLET_SOURCES.map(f => basename(f)).sort()).toEqual([
+      'CameraFeed.tsx', 'interpretDetections.ts', 'orientation.ts',
+    ]);
+  });
+
   it('only ever hoists members off the TFLite model', () => {
     // `model.runSync` is a JSI host function that owns its own native handle,
     // so detaching it from `model` is safe and is how fast-tflite is meant to
     // be used. Every other partial capture is the `Set`-shaped bug: a method
     // lifted away from the object it needs as its receiver.
-    const hoisted = [CAMERA_FEED, INTERPRET, ORIENTATION]
+    const hoisted = WORKLET_SOURCES
       .flatMap(file => capturesOf(compile(file)).map(c => ({ file: basename(file), ...c })))
       .filter(c => c.hoistedMembers)
       .map(c => `${c.file}: ${c.key} = ${c.code}`);

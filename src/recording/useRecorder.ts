@@ -20,7 +20,18 @@ interface Options {
   onError?: (message: string) => void;
 }
 
+/**
+ * How long the encoder gets to hand a clip back after a stop.
+ *
+ * `isRecording` stays true across that window, which is what keeps the camera
+ * session alive while the file is being finalised — so it also has to end.
+ * Without a bound, a stop VisionCamera never calls back on would leave the
+ * preview running with surveillance switched off.
+ */
+export const FINALIZE_TIMEOUT_MS = 5000;
+
 export interface Recorder {
+  /** True while a clip is being written, and while a stop is still in flight. */
   isRecording: boolean;
   /** Returns false if already recording, disabled, or the clip directory isn't ready. */
   start: () => boolean;
@@ -41,8 +52,11 @@ export interface Recorder {
 export function useRecorder({ cameraRef, enabled, max, onClip, onError }: Options): Recorder {
   const [isRecording, setIsRecording] = useState(false);
   const activeRef = useRef(false);
+  /** Set between `stopRecording()` and the callback that answers it. */
+  const stoppingRef = useRef(false);
   const readyRef = useRef(false);
   const capTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finalizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Callbacks are read through refs so a re-render mid-recording can't leave
   // VisionCamera holding a stale `onClip` from a previous settings value.
@@ -66,20 +80,36 @@ export function useRecorder({ cameraRef, enabled, max, onClip, onError }: Option
     }
   }, []);
 
+  /** Whatever the encoder answered, the recording is over. */
+  const settle = useCallback(() => {
+    activeRef.current = false;
+    stoppingRef.current = false;
+    if (finalizeTimerRef.current) {
+      clearTimeout(finalizeTimerRef.current);
+      finalizeTimerRef.current = null;
+    }
+    setIsRecording(false);
+  }, []);
+
   const stop = useCallback((): boolean => {
-    if (!activeRef.current) return false;
+    // A second stop while the first is still in flight is not a second clip:
+    // VisionCamera throws on it, and the old code took that throw as proof
+    // nothing was recording — clearing `isRecording` while the encoder was
+    // still writing, which is exactly when the camera session must stay up.
+    if (!activeRef.current || stoppingRef.current) return false;
     clearCap();
     // Leave `activeRef` set until the callback fires: stopping is asynchronous,
     // and a start() slipping in before then would throw inside VisionCamera.
     try {
       cameraRef.current?.stopRecording();
+      stoppingRef.current = true;
+      finalizeTimerRef.current = setTimeout(settle, FINALIZE_TIMEOUT_MS);
       return true;
     } catch {
-      activeRef.current = false;
-      setIsRecording(false);
+      settle();
       return false;
     }
-  }, [cameraRef, clearCap]);
+  }, [cameraRef, clearCap, settle]);
 
   const start = useCallback((): boolean => {
     const camera = cameraRef.current;
@@ -94,8 +124,7 @@ export function useRecorder({ cameraRef, enabled, max, onClip, onError }: Option
         videoCodec: 'h264',
         path: RECORDINGS_DIR,
         onRecordingFinished: (video: VideoFile) => {
-          activeRef.current = false;
-          setIsRecording(false);
+          settle();
           clearCap();
           // `VideoFile` has no size, so the real byte count is read back from
           // disk once the encoder has closed the file.
@@ -104,15 +133,13 @@ export function useRecorder({ cameraRef, enabled, max, onClip, onError }: Option
           });
         },
         onRecordingError: error => {
-          activeRef.current = false;
-          setIsRecording(false);
+          settle();
           clearCap();
           onErrorRef.current?.(error.message);
         },
       });
     } catch (e) {
-      activeRef.current = false;
-      setIsRecording(false);
+      settle();
       onErrorRef.current?.(e instanceof Error ? e.message : 'Enregistrement impossible');
       return false;
     }
@@ -122,7 +149,7 @@ export function useRecorder({ cameraRef, enabled, max, onClip, onError }: Option
       stop();
     }, maxDurationMs(max));
     return true;
-  }, [cameraRef, clearCap, enabled, max, stop]);
+  }, [cameraRef, clearCap, enabled, max, settle, stop]);
 
   // Losing the camera (monitoring off, screen unmounted) must not leave the
   // encoder running against a file nothing will ever claim.
@@ -132,10 +159,12 @@ export function useRecorder({ cameraRef, enabled, max, onClip, onError }: Option
 
   useEffect(() => () => {
     clearCap();
-    if (activeRef.current) {
+    if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
+    if (activeRef.current && !stoppingRef.current) {
       try { cameraRef.current?.stopRecording(); } catch { /* already torn down */ }
-      activeRef.current = false;
     }
+    activeRef.current = false;
+    stoppingRef.current = false;
   }, [cameraRef, clearCap]);
 
   return { isRecording, start, stop };

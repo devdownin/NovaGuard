@@ -106,7 +106,14 @@ export function CameraFeed({
     windowWidth: viewWidth || 1,
     windowHeight: viewHeight || 1,
   }), [cameraPosition, viewWidth, viewHeight]);
-  const { detectFaces } = useFaceDetector(faceDetectorOptions);
+  const faceDetector = useFaceDetector(faceDetectorOptions);
+  const { detectFaces } = faceDetector;
+
+  // ML Kit's plugin registers a device-orientation listener on Android and
+  // nothing in the library takes it back down; `stopListeners` is the only
+  // teardown it exposes. A new plugin instance is built whenever the options
+  // above change, so this runs on every one of them, not just on unmount.
+  useEffect(() => faceDetector.stopListeners, [faceDetector]);
 
   const onJsFrame = useRunOnJS((
     detections: FrameDetection[],

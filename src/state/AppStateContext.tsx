@@ -196,11 +196,16 @@ const MAX_OPTIONS: MaxDuration[] = ['1 min', '2 min', '5 min'];
 const QUALITY_OPTIONS: Quality[] = ['720p', '1080p', '4K'];
 
 /**
- * How long surveillance has to survive before it is worth resuming next launch.
+ * How long surveillance has to keep running, *after its first frame*, before it
+ * is worth resuming next launch.
  *
- * Long enough to cover the whole fragile stretch — foreground service, camera
- * session, model load, first frames — which is exactly where a start that is
- * going to fail does so.
+ * The countdown deliberately starts at the first frame rather than at the tap.
+ * Everything fragile has to have already worked for a frame to arrive at all —
+ * the foreground service, the camera session, the model, the frame-processor
+ * worklet — and the clock used to start at hydration, which on a cold launch
+ * spends its first 1.6 s behind the splash with no camera even mounted. A start
+ * that never produces a frame now never asks to be repeated, which is the whole
+ * point: `resumeOnLaunch` replaying a crash is what made this app unopenable.
  */
 export const RESUME_ARM_MS = 8000;
 
@@ -226,6 +231,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [tab, setTab] = useState<Tab>('cam');
 
   const [monitoring, setMonitoring] = useState(false);
+  /** True once the camera has delivered a frame for the current session. */
+  const [sawFrame, setSawFrame] = useState(false);
+  const sawFrameRef = useRef(false);
   const [det, setDet] = useState<DetectionKind | null>(null);
   // Frame-rate state lives in `ViewfinderProvider` below; the provider reaches
   // its setters through this sink, so a detection never re-renders this body.
@@ -272,7 +280,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [s, ev, dt, ld, wasMonitoring, onboarded] = await Promise.all([
+      const [s, storedEvents, dt, ld, wasMonitoring, onboarded] = await Promise.all([
         storage.loadSettings(),
         storage.loadEvents(),
         storage.loadDetToday(),
@@ -286,10 +294,19 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       // spreading it whole would leave those undefined.
       const restored = s ? { ...defaultSettings, ...s } : defaultSettings;
       setSettings(restored);
+      const ev = storedEvents.value;
       if (ev) {
         setEvents(ev);
         lastEventIdRef.current = ev.reduce((max, e) => Math.max(max, e.id), 0);
       }
+      // A history we could not read is not an empty history. Both the orphan
+      // sweep below and the write-back effect would treat it as one — the
+      // sweep deleting every clip on disk, the write-back replacing the stored
+      // list with `[]` — so a single unreadable key would destroy every
+      // recording the user has, silently, at launch. Hold both off instead,
+      // and say so rather than showing an empty Historique with no explanation.
+      eventsWritableRef.current = storedEvents.ok;
+      if (!storedEvents.ok) setRecError('Historique illisible : les vidéos sont conservées');
       setDetToday(todayCount(dt, Date.now()));
       if (ld) setLastDet(ld);
       setOnb(onboarded ? null : 'intro');
@@ -308,8 +325,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
       // Clips left behind by a crash between the encoder closing a file and the
       // event being written would otherwise take up space nothing accounts for.
-      const orphans = await orphanedRecordings((ev ?? []).map(e => e.path));
-      if (orphans.length) await deleteFiles(orphans);
+      if (storedEvents.ok) {
+        const orphans = await orphanedRecordings((ev ?? []).map(e => e.path));
+        if (orphans.length) await deleteFiles(orphans);
+      }
       await dropStaleKeys();
     })();
     return () => { cancelled = true; };
@@ -317,7 +336,11 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   // ── persist on change (skip the initial hydration write) ───────────
   useEffect(() => { if (hydrated) storage.saveSettings(settings); }, [hydrated, settings]);
-  useEffect(() => { if (hydrated) storage.saveEvents(events); }, [hydrated, events]);
+  /** False once a read failed, so nothing overwrites a history we cannot see. */
+  const eventsWritableRef = useRef(true);
+  useEffect(() => {
+    if (hydrated && eventsWritableRef.current) storage.saveEvents(events);
+  }, [hydrated, events]);
   useEffect(() => {
     if (hydrated) storage.saveDetToday({ count: detToday, day: Date.now() });
   }, [hydrated, detToday]);
@@ -338,9 +361,11 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       storage.saveMonitoring(false);
       return undefined;
     }
+    // Nothing to arm until the camera has actually produced a frame.
+    if (!sawFrame) return undefined;
     const arm = setTimeout(() => storage.saveMonitoring(true), RESUME_ARM_MS);
     return () => clearTimeout(arm);
-  }, [hydrated, monitoring]);
+  }, [hydrated, monitoring, sawFrame]);
 
   // ── midnight rollover ───────────────────────────────────────────────
   // The displayed clock is not state here: it changes every second and only one
@@ -505,6 +530,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   }, [cancelPostRoll, clearSession, commitEvent, sessionMeta, stopRecording]);
 
   const reportDetections = useCallback((detections: FrameDetection[], aspect: number) => {
+    // Through a ref so this stays a once-per-session write: `setSawFrame` is a
+    // stable setter, so arming the resume flag costs the frame path nothing and
+    // leaves this callback's identity — and the worklet's — untouched.
+    if (!sawFrameRef.current) {
+      sawFrameRef.current = true;
+      setSawFrame(true);
+    }
     viewfinder.current?.setFrameAspect(aspect);
 
     const next = updateTracks(tracksRef.current, detections, Date.now());
@@ -568,6 +600,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       endSession();
       tracksRef.current = [];
       viewfinder.current?.setTracks(() => []);
+      sawFrameRef.current = false;
+      setSawFrame(false);
       setMonitoring(false);
       return;
     }

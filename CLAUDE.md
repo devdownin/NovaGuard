@@ -71,6 +71,13 @@ existe pour ça : conserver l'identité quand l'incrustation ne changerait pas.
 exhaustif (`clipOutcome`) : rattaché, gardé comme événement sans fichier, ou
 supprimé. Il n'y a pas de quatrième issue, et il ne doit pas y en avoir.
 
+**Une lecture qui échoue n'est pas une valeur vide.** Le balayage de démarrage
+supprime tout clip que plus aucun évènement ne réclame ; un chargeur qui répond
+`null` pour « illisible » comme pour « jamais écrit » lui fait donc effacer
+toute la bibliothèque. Ce qui peut détruire quelque chose lit à travers
+`readJsonChecked` et s'abstient quand `ok` est faux — sans réécrire non plus la
+clé qu'il n'a pas su lire.
+
 **Les frontières de jour se calculent en jours calendaires**, via
 `startOfDayBefore`. Soustraire 86 400 000 ms décale d'une heure aux changements
 d'heure, et c'est la rétention — donc une suppression — qui en dépend.

@@ -124,7 +124,12 @@ export function Viewfinder() {
       >
         <CameraFeed
           style={StyleSheet.absoluteFill}
-          active={monitoring}
+          // `|| recording` on purpose: stopping surveillance issues
+          // `stopRecording()` and drops `monitoring` in the same commit, so
+          // `isActive` used to go false while the encoder was still closing the
+          // file — tearing the capture session down under the clip being
+          // finalised. The session now outlives the recording it is writing.
+          active={monitoring || recording}
           viewWidth={size.width}
           viewHeight={size.height}
           onFrame={autoZoom.submitFrame}
