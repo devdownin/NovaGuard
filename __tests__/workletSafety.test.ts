@@ -192,7 +192,7 @@ describe('worklet closures', () => {
 
 describe('the compiled analysis worklet', () => {
   /**
-   * The innermost `runAsync` body, pulled straight out of the compiled bundle.
+   * The innermost worklet body, pulled straight out of the compiled bundle.
    *
    * `CameraFeed` cannot be loaded here — it needs the whole React Native
    * runtime — but the worklet's source is a plain string in the output, which
@@ -211,8 +211,9 @@ describe('the compiled analysis worklet', () => {
         }
       },
     });
-    // The one that resizes a frame and never re-enters `runAsync`.
-    const analysis = bodies.filter(body => body.includes('resize(frame') && !body.includes('runAsync('));
+    // The analysis itself, not the frame processor that throttles it: a
+    // nested worklet's source also appears inside its parent's body.
+    const analysis = bodies.filter(body => body.includes('resize(frame') && !body.includes('runAtTargetFps('));
     expect(analysis).toHaveLength(1);
     return analysis[0];
   }
@@ -236,6 +237,7 @@ describe('the compiled analysis worklet', () => {
       onJsFrame: jest.fn(),
       uprightAspect: () => 9 / 16,
       onFrameError: jest.fn(),
+      onFrameStage: jest.fn(),
       ...overrides,
     };
   }
@@ -246,11 +248,56 @@ describe('the compiled analysis worklet', () => {
     body.apply({ __closure: closure });
   }
 
+  it('analyses on the thread the frame arrives on', () => {
+    // `runAsync` moves the work to a second worklet context and keeps the
+    // frame alive across threads. That is where the app died: SIGSEGV on
+    // `VisionCamera.video` within a few frames of the preview appearing, then
+    // an ImageReader out of buffers because the frames it held were never
+    // closed — the same crash upstream has open on the same thread
+    // (mrousavy/react-native-vision-camera#2589). `runAtTargetFps` already
+    // drops the frames we do not want to look at, so nothing is gained by
+    // holding one longer than the callback that delivered it.
+    const compiled = compile(resolve(ROOT, 'src/components/CameraFeed.tsx'));
+    expect(compiled).not.toMatch(/\brunAsync\b/);
+  });
+
   it('hands a frame it analysed to the JS thread', () => {
     const closure = closureFor();
     runAnalysis(closure);
     expect(closure.onJsFrame).toHaveBeenCalled();
     expect(closure.onFrameError).not.toHaveBeenCalled();
+  });
+
+  it('names each native call before making it, not after', () => {
+    // The order is the diagnostic: a stage recorded on the way *in* names the
+    // call that killed the process, where one recorded on the way out would
+    // name the last thing that worked.
+    const closure = closureFor();
+    runAnalysis(closure);
+
+    const stages = (closure.onFrameStage as jest.Mock).mock.calls.map(([s]) => s);
+    // `faces` is absent because this closure has autoZoom off — the stage is
+    // only claimed when the call is actually about to happen.
+    expect(stages).toEqual(['resize', 'inference', 'report']);
+  });
+
+  it('claims the face-detection stage only when it runs', () => {
+    const closure = closureFor({ autoZoom: true });
+    runAnalysis(closure);
+
+    const stages = (closure.onFrameStage as jest.Mock).mock.calls.map(([s]) => s);
+    expect(stages).toEqual(['resize', 'inference', 'faces', 'report']);
+  });
+
+  it('leaves the stage at the call that threw', () => {
+    // The whole point: the last stage named is the one the process was inside.
+    const closure = closureFor({
+      model: { runSync: () => { throw new Error('boom'); } },
+    });
+    runAnalysis(closure);
+
+    const stages = (closure.onFrameStage as jest.Mock).mock.calls.map(([s]) => s);
+    expect(stages[stages.length - 1]).toBe('inference');
   });
 
   it('reports a failure instead of letting it close the app', () => {
