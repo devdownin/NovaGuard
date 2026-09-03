@@ -132,7 +132,11 @@ export function CameraFeed({
   // nothing in the library takes it back down; `stopListeners` is the only
   // teardown it exposes. A new plugin instance is built whenever the options
   // above change, so this runs on every one of them, not just on unmount.
-  useEffect(() => faceDetector.stopListeners, [faceDetector]);
+  useEffect(() => {
+    return () => {
+      faceDetector.stopListeners();
+    };
+  }, [faceDetector]);
 
   const onJsFrame = useRunOnJS((
     detections: FrameDetection[],
