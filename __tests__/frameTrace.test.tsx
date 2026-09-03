@@ -18,7 +18,9 @@ import ReactTestRenderer from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCameraDevice, useCameraPermission } from 'react-native-vision-camera';
 import { Viewfinder } from '../src/components/Viewfinder';
-import { mountProvider } from '../testing/mountProvider';
+import { CameraFeed } from '../src/components/CameraFeed';
+import { AppStateProvider, useAppState } from '../src/state/AppStateContext';
+import { AppState, mountProvider } from '../testing/mountProvider';
 import {
   FRAME_STAGES, isCompleteFrame, isLaterStage, parseStage, stageDiagnosis,
 } from '../src/camera/frameTrace';
@@ -31,6 +33,12 @@ const stored = () => AsyncStorage.getItem(STAGE_KEY);
 beforeEach(async () => {
   jest.useFakeTimers();
   jest.clearAllMocks();
+  // `clearAllMocks` forgets the calls, not the return values a test set, so
+  // without this a camera granted by one test is still granted in the next.
+  (useCameraPermission as jest.Mock).mockReturnValue({
+    hasPermission: false, requestPermission: jest.fn(),
+  });
+  (useCameraDevice as jest.Mock).mockReturnValue(undefined);
   await AsyncStorage.clear();
 });
 
@@ -141,21 +149,33 @@ describe('the camera opening', () => {
     (useCameraDevice as jest.Mock).mockReturnValue({ id: 'back', position: 'back' });
   }
 
+  /** A `CameraFeed` reporting stages the way `Viewfinder` wires it. */
+  function Feed({ active }: { active: boolean }) {
+    const { reportFrameStage } = useAppState();
+    return (
+      <CameraFeed
+        style={null}
+        active={active}
+        viewWidth={320}
+        viewHeight={640}
+        onStage={reportFrameStage}
+      />
+    );
+  }
+
   it('is written down before a single frame arrives', async () => {
     // Opening a session is native too. A launch that dies in CameraX never
     // reaches the frame processor, so without this its trace is empty — which
     // reads exactly like a launch that never started surveillance.
     withCamera();
-    const app = await mountProvider(<Viewfinder />);
-
-    await ReactTestRenderer.act(async () => { app.state.toggleMonitoring(); });
+    await mountProvider(<Feed active />);
 
     await expect(stored()).resolves.toBe(JSON.stringify('camera'));
   });
 
-  it('says nothing while surveillance is off', async () => {
+  it('says nothing while the camera is not running', async () => {
     withCamera();
-    await mountProvider(<Viewfinder />);
+    await mountProvider(<Feed active={false} />);
     await expect(stored()).resolves.toBeNull();
   });
 
@@ -164,9 +184,30 @@ describe('the camera opening', () => {
     // renders nothing, so there is no session to accuse of anything.
     withCamera();
     (useCameraDevice as jest.Mock).mockReturnValue(undefined);
-    const app = await mountProvider(<Viewfinder />);
-    await ReactTestRenderer.act(async () => { app.state.toggleMonitoring(); });
+    await mountProvider(<Feed active />);
     await expect(stored()).resolves.toBeNull();
+  });
+
+  it('is what the viewfinder hands the camera', async () => {
+    // The three tests above drive `CameraFeed` directly; this is the join that
+    // makes them mean anything in the app. Read off the tree rather than by
+    // turning surveillance on, which would start the scan-beam animation and
+    // the foreground service for a fact neither of them decides.
+    withCamera();
+    const handle = {} as { state: AppState };
+    function Probe() {
+      handle.state = useAppState();
+      return <CameraFeed style={null} active={false} viewWidth={320} viewHeight={640} />;
+    }
+    let tree!: ReactTestRenderer.ReactTestRenderer;
+    await ReactTestRenderer.act(async () => {
+      tree = ReactTestRenderer.create(<AppStateProvider><Viewfinder /><Probe /></AppStateProvider>);
+    });
+    await ReactTestRenderer.act(async () => {});
+
+    const feeds = tree.root.findAllByType(CameraFeed);
+    const viewfinderFeed = feeds.find(feed => feed.props.onStage != null);
+    expect(viewfinderFeed?.props.onStage).toBe(handle.state.reportFrameStage);
   });
 });
 
