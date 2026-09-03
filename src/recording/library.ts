@@ -93,16 +93,21 @@ export function qualityResolution(quality: Quality): { width: number; height: nu
 }
 
 /**
- * Target bitrates in Mbps, in the range VisionCamera accepts as a raw number.
+ * Target bitrates in **Mbps**, which is the unit `<Camera videoBitRate>` takes
+ * as a raw number — Android multiplies it by 1e6 and hands the result to the
+ * encoder. These used to be written in bits per second, so the camera was asked
+ * for three million megabits: past `Int.MAX_VALUE`, so the value saturated and
+ * the encoder got an unusable target instead of the rate the row promises.
+ *
  * Chosen well below broadcast rates: this is surveillance footage on a phone,
  * where hours of retained clips matter more than pristine gradients.
  */
 export function qualityBitRate(quality: Quality): number {
   switch (quality) {
-    case '720p': return 3_000_000;
-    case '1080p': return 6_000_000;
-    case '4K': return 20_000_000;
-    default: return 6_000_000;
+    case '720p': return 3;
+    case '1080p': return 6;
+    case '4K': return 20;
+    default: return 6;
   }
 }
 
