@@ -54,6 +54,7 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et ce p
 - Correction de 7 vulnérabilités modérées (`npm audit` : 7 → 0) : `fast-xml-parser < 5.7.0` ([GHSA-gh4j-gqv2-49f6](https://github.com/advisories/GHSA-gh4j-gqv2-49f6), injection XML/CDATA), atteint via `@react-native-community/cli-*` ≤ 20.1.1.
 
 ### Corrigé
+- **Le dépôt s'appelle `devdownin/novaguard`.** Le nom précédent contenait des majuscules, qu'une référence Docker interdit — et `android-image.yml` construit son tag à partir de `${{ github.repository }}`, donc `ghcr.io/devdownin/NovaGuard/android-build` était une référence invalide et le workflow échouait avant de commencer. Toutes les URL du dépôt sont mises à jour — badges, `package.json`, liens « Code source » et « Signaler un bug » de l'écran Setup — et le nom du paquet npm passe en minuscules avec elles. `app.json` garde `NovaGuard` : c'est la clé qu'`AppRegistry` enregistre et que `MainActivity.getMainComponentName()` va chercher, pas un identifiant d'outillage.
 - **Quatre paquets Babel et les types Node étaient importés sans être déclarés.** `__tests__/workletSafety.test.ts` se servait directement de `@babel/parser`, `@babel/traverse`, `@babel/generator` et `@babel/types` ; ils ne résolvaient que parce que `@babel/core` les tire. Rien ne le signalait, la CI comprise.
 - **Le repli CPU du modèle ne pouvait pas être défait.** Il était mémorisé comme « on est retombé sur le CPU », un drapeau sans retour : la session entière restait sur le CPU. Ce qui est mémorisé est maintenant *quel* délégué a refusé, donc un GPU déjà refusé n'est pas redemandé, et un GPU simplement contourné est réessayé.
 - **Un historique illisible effaçait toutes les vidéos, au lancement, en silence.** Le chargeur renvoyait `null` aussi bien pour « jamais écrit » que pour « illisible », et le balayage de démarrage supprime tout clip du disque qu'aucun évènement ne réclame : une clé `@novaguard:events:v2` corrompue ou une lecture en échec se lisait donc comme un historique vide au-dessus d'un dossier plein. L'effet de persistance réécrivait ensuite `[]` par-dessus, de sorte que le lancement suivant était d'accord. Les deux sont maintenant conditionnés à une lecture réellement réussie, et le viseur le dit au lieu d'afficher un Historique vide sans explication.
@@ -144,5 +145,5 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), et ce p
 - Section « À propos » : version, licence, lien vers le dépôt, licences tierces.
 - Persistance locale des réglages, permissions et de l'historique (`AsyncStorage`).
 
-[Non publié]: https://github.com/devdownin/NovaGuard/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/devdownin/NovaGuard/releases/tag/v1.0.0
+[Non publié]: https://github.com/devdownin/novaguard/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/devdownin/novaguard/releases/tag/v1.0.0
