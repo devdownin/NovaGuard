@@ -11,7 +11,7 @@ import {
 import {
   defaultDetToday, defaultEvents, defaultLastDet, defaultSettings,
 } from './defaults';
-import { dropStaleKeys, storage } from './storage';
+import { dropStaleKeys, EMPTY_STORED_SIZE, storage, StoredSize } from './storage';
 import { pad } from '../utils/date';
 import { useLatest } from '../utils/useLatest';
 import { FrameDetection } from '../ml/types';
@@ -119,6 +119,11 @@ interface AppStateValue {
 
   // info panel (permissions / stored data)
   info: InfoPanel;
+  /**
+   * Bytes NovaGuard actually keeps in AsyncStorage, re-measured each time the
+   * "Données stockées" panel opens. Zeroes until it has been.
+   */
+  storedSize: StoredSize;
   openInfo: (panel: Exclude<InfoPanel, null>) => void;
   closeInfo: () => void;
 
@@ -1001,7 +1006,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const setRetention = useCallback((r: Retention) => patchSettings({ retention: r }), [patchSettings]);
 
   // ── info panel ───────────────────────────────────────────────────────
-  const openInfo = useCallback((panel: Exclude<InfoPanel, null>) => setInfo(panel), []);
+  const [storedSize, setStoredSize] = useState<StoredSize>(EMPTY_STORED_SIZE);
+  const openInfo = useCallback((panel: Exclude<InfoPanel, null>) => {
+    setInfo(panel);
+    // On opening rather than on a timer: it is read once, by someone who just
+    // asked, and reading every key has no business on any hot path.
+    if (panel === 'data') storage.measure().then(setStoredSize);
+  }, []);
   const closeInfo = useCallback(() => setInfo(null), []);
 
   // ── onboarding ───────────────────────────────────────────────────────
@@ -1052,7 +1063,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     settings, toggleSection, cycleCamera, toggleResumeOnLaunch, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom, toggleForceCpu,
     setSensitivity, setThreshold, cyclePost, cycleMax, cycleQuality, setRetention,
     toggleAutoDel, toggleNotif, toggleNotifDet, openAlertSoundSettings, wipeAllVideos,
-    info, openInfo, closeInfo,
+    info, storedSize, openInfo, closeInfo,
     onb, perms, onbNext, onbFinish, grantPermission,
   }), [
     hydrated, tab, monitoring, det, detToday, lastDet,
@@ -1062,7 +1073,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     settings, toggleSection, cycleCamera, toggleResumeOnLaunch, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom, toggleForceCpu,
     setSensitivity, setThreshold, cyclePost, cycleMax, cycleQuality, setRetention,
     toggleAutoDel, toggleNotif, toggleNotifDet, openAlertSoundSettings, wipeAllVideos,
-    info, openInfo, closeInfo, onb, perms, onbNext, onbFinish, grantPermission,
+    info, storedSize, openInfo, closeInfo, onb, perms, onbNext, onbFinish, grantPermission,
   ]);
 
   return (

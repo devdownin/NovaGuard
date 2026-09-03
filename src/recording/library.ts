@@ -24,12 +24,25 @@ export const LOW_SPACE_BYTES = 500 * 1024 * 1024;
  */
 export const MIN_FREE_BYTES = 150 * 1024 * 1024;
 
+const KO = 1024;
+const MO = KO * 1024;
+const GO = MO * 1024;
+
+/**
+ * A size, in the unit that actually suits it.
+ *
+ * Kilobytes are not decoration: this formats the detection journal as well as
+ * the clips, and a few kilobytes of history rendered against a megabyte floor
+ * came out as "0,0 Mo" — a real amount of stored data displayed as none, on the
+ * one screen whose job is to say what the app keeps. Anything above zero is at
+ * least "1 Ko" for the same reason.
+ */
 export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 Mo';
-  const mo = bytes / (1024 * 1024);
-  if (mo >= 1024) return (mo / 1024).toFixed(1).replace('.', ',') + ' Go';
-  if (mo >= 10) return Math.round(mo).toString() + ' Mo';
-  return mo.toFixed(1).replace('.', ',') + ' Mo';
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 Ko';
+  if (bytes >= GO) return (bytes / GO).toFixed(1).replace('.', ',') + ' Go';
+  if (bytes >= 10 * MO) return Math.round(bytes / MO).toString() + ' Mo';
+  if (bytes >= MO) return (bytes / MO).toFixed(1).replace('.', ',') + ' Mo';
+  return Math.max(1, Math.round(bytes / KO)).toString() + ' Ko';
 }
 
 /** `null` means "Toujours" — nothing ever expires on age alone. */

@@ -33,6 +33,40 @@ export async function dropStaleKeys(): Promise<void> {
   }
 }
 
+/**
+ * Bytes a string occupies once encoded as UTF-8.
+ *
+ * `String.length` counts UTF-16 code units, which undercounts every accent and
+ * halves nothing at all for an emoji. The clips are named after what triggered
+ * them and live at paths the user's locale can shape, so the difference is real
+ * rather than theoretical — and this figure is shown to the user as the size of
+ * what NovaGuard keeps.
+ */
+export function utf8Bytes(value: string): number {
+  let bytes = 0;
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      // A surrogate pair is one character in four bytes; skip its second half.
+      bytes += 4;
+      i++;
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
+/** What NovaGuard keeps in AsyncStorage, split the way the user is shown it. */
+export interface StoredSize {
+  /** The detection history. */
+  journal: number;
+  /** Settings, counters and flags — everything else. */
+  settings: number;
+}
+
+export const EMPTY_STORED_SIZE: StoredSize = { journal: 0, settings: 0 };
+
 async function readJson<T>(key: string): Promise<T | null> {
   return (await readJsonChecked<T>(key)).value;
 }
@@ -64,6 +98,33 @@ async function writeJson(key: string, value: unknown): Promise<void> {
 }
 
 export const storage = {
+  /**
+   * Measures what is actually on disk, rather than describing it.
+   *
+   * The panel this feeds used to carry two hardcoded figures — including a
+   * thumbnail cache for a feature that does not exist anywhere in this
+   * repository. A screen that exists to tell the user what is kept about them
+   * is the last place to invent numbers.
+   *
+   * A key that cannot be read contributes nothing instead of failing the count:
+   * an unreadable value is a figure we do not have, not a reason to show none.
+   */
+  measure: async (): Promise<StoredSize> => {
+    const size = async (key: string) => {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        return raw ? utf8Bytes(raw) : 0;
+      } catch {
+        return 0;
+      }
+    };
+    const [journal, ...rest] = await Promise.all([
+      size(KEYS.events),
+      ...Object.entries(KEYS).filter(([name]) => name !== 'events').map(([, key]) => size(key)),
+    ]);
+    return { journal, settings: rest.reduce((sum, n) => sum + n, 0) };
+  },
+
   loadSettings: () => readJson<Settings>(KEYS.settings),
   saveSettings: (v: Settings) => writeJson(KEYS.settings, v),
 

@@ -47,9 +47,19 @@ describe('formatBytes', () => {
   });
 
   it('never renders a negative or nonsense size', () => {
-    expect(formatBytes(0)).toBe('0 Mo');
-    expect(formatBytes(-5)).toBe('0 Mo');
-    expect(formatBytes(NaN)).toBe('0 Mo');
+    expect(formatBytes(0)).toBe('0 Ko');
+    expect(formatBytes(-5)).toBe('0 Ko');
+    expect(formatBytes(NaN)).toBe('0 Ko');
+  });
+
+  it('expresses small sizes in kilobytes rather than as no data at all', () => {
+    // The detection journal is a few kilobytes. Against a megabyte floor it
+    // read "0,0 Mo" — real stored data shown as none, on the screen whose whole
+    // job is to say what the app keeps.
+    expect(formatBytes(6 * 1024)).toBe('6 Ko');
+    expect(formatBytes(900 * 1024)).toBe('900 Ko');
+    // Rounding down to "0 Ko" would make a non-empty store look empty.
+    expect(formatBytes(200)).toBe('1 Ko');
   });
 });
 
