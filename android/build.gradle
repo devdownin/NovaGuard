@@ -21,4 +21,38 @@ buildscript {
     }
 }
 
+/**
+ * One toolchain for every module, not just ours.
+ *
+ * The versions above only bind `:app` and the libraries polite enough to read
+ * `rootProject.ext`. The others disagree, and each disagreement is a build
+ * failure rather than a slower build: the SDK in the build image carries
+ * exactly what is pinned here, so a module asking for anything else makes AGP
+ * try to download it into a directory it cannot write to —
+ *
+ *     Failed to install: ndk;27.0.12077973
+ *     The SDK directory is not writable (/opt/android-sdk)
+ *
+ * Two are in the tree right now, and they fail for different reasons, which is
+ * why this forces the values instead of chasing them one library at a time:
+ *   - react-native-worklets-core declares no `ndkVersion` at all, so AGP falls
+ *     back to its own default (27.0.12077973);
+ *   - react-native-vision-camera-face-detector hardcodes its own defaults —
+ *     NDK 27.3.13750724, platform 35, build-tools 35.0.0.
+ *
+ * Registered from the root script, so these callbacks are queued before each
+ * subproject applies the Android plugin, and therefore run before AGP resolves
+ * any of it.
+ */
+subprojects { subproject ->
+    afterEvaluate {
+        def androidExtension = subproject.extensions.findByName("android")
+        if (androidExtension == null) return
+
+        androidExtension.compileSdk = rootProject.ext.compileSdkVersion
+        androidExtension.buildToolsVersion = rootProject.ext.buildToolsVersion
+        androidExtension.ndkVersion = rootProject.ext.ndkVersion
+    }
+}
+
 apply plugin: "com.facebook.react.rootproject"

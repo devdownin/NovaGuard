@@ -99,6 +99,18 @@ a cassé tous les builds d'APK sans qu'aucune PR verte ne le signale. D'où l'é
 `xmllint` dans le job `check`. Une erreur Android ne peut pas être attrapée par
 tsc, eslint ou jest.
 
+**Une dépendance qui réclame un autre NDK casse le build.** L'image porte
+exactement ce que `android/build.gradle` épingle, et rien d'autre : un module
+qui demande autre chose fait tenter à AGP un téléchargement dans un SDK en
+lecture seule, et ça s'arrête là. Deux cas déjà présents — `worklets-core` ne
+déclare aucun `ndkVersion` (AGP retombe sur le sien), le détecteur de visages
+code en dur NDK 27.3, plateforme 35, build-tools 35. Le bloc `subprojects` de
+`android/build.gradle` force les trois valeurs sur **tous** les modules Android
+plutôt que de les poursuivre un par un, et `__tests__/toolchainPinning.test.ts`
+vérifie que `build.gradle`, le `Dockerfile` et les assertions d'`android-image.yml`
+nomment bien les mêmes versions — l'échec, lui, ne se voit que dans un vrai run
+Gradle, que la CI ne fait pas sur une PR ordinaire.
+
 ## Construire l'APK
 
 Le SDK Android n'est pas nécessaire sur la machine : `Dockerfile` porte la
@@ -153,6 +165,7 @@ regardez le test échouer, restaurez.
 
 ## Conventions
 
-- Java 17, `minSdk`/`compileSdk`/`targetSdk` 36, un seul niveau de plateforme.
+- Java 17, `minSdk`/`compileSdk`/`targetSdk` 36, un seul niveau de plateforme —
+  imposé aux dépendances aussi, voir plus bas.
 - Fusion par commit de merge, pas de squash.
 - Le CHANGELOG suit Keep a Changelog ; les changements visibles y vont.
