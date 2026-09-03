@@ -7,10 +7,18 @@ import { DetectionBox } from '../ml/types';
  * the one part of the auto-zoom that can be verified without a device.
  *
  * Coordinate spaces:
- * - "square space": normalized 0–1 inside the centered square crop the TFLite
- *   model is fed (what `interpretDetections` returns).
+ * - "upright-frame space": normalized 0–1 inside the whole camera frame, after
+ *   it has been rotated upright — what `interpretDetections` returns. The
+ *   resize plugin is handed the entire frame and stretches it into the model's
+ *   square input, so a box comes back normalized against the frame, not against
+ *   a crop of it. It described a centred square crop until that crop was
+ *   removed for throwing away the sides of the field of view; a reader who
+ *   believed the old wording would go looking for a square-to-frame conversion
+ *   that must not exist.
  * - "view space": normalized 0–1 inside the viewfinder rect, which is what the
- *   overlay draws in and what the zoom transform operates on.
+ *   overlay draws in and what the zoom transform operates on. Face boxes arrive
+ *   here directly: ML Kit is given the viewfinder's own size as its window, so
+ *   `CameraFeed` only divides its pixels by that size.
  */
 
 export interface Framing {
