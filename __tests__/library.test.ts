@@ -72,6 +72,17 @@ describe('setting translations', () => {
     expect(new Set(rates).size).toBe(3);
     expect(rates[0]).toBeLessThan(rates[2]);
   });
+
+  it('states the bitrate in the megabits VisionCamera expects', () => {
+    // Android does `videoBitRate * 1_000_000` and hands an Int to the encoder.
+    // Written in bits per second — as these were — every value overflows Int
+    // and the encoder is configured with something no device can honour.
+    for (const quality of ['720p', '1080p', '4K'] as const) {
+      const bitsPerSecond = qualityBitRate(quality) * 1_000_000;
+      expect(bitsPerSecond).toBeLessThan(2 ** 31 - 1);
+      expect(bitsPerSecond).toBeGreaterThan(1_000_000);
+    }
+  });
 });
 
 describe('expiredEvents', () => {

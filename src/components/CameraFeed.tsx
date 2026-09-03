@@ -1,4 +1,4 @@
-import React, { RefObject, useEffect } from 'react';
+import React, { RefObject, useEffect, useMemo } from 'react';
 import { StyleProp, ViewStyle } from 'react-native';
 import {
   Camera, runAsync, runAtTargetFps, useCameraDevice, useCameraFormat, useFrameProcessor,
@@ -57,10 +57,8 @@ export function CameraFeed({
 }: CameraFeedProps) {
   const { perms, settings, reportDetections } = useAppState();
 
-  const device = useCameraDevice(
-    devicePositionFor(settings.camera),
-    physicalDeviceFilterFor(settings.camera),
-  );
+  const cameraPosition = devicePositionFor(settings.camera);
+  const device = useCameraDevice(cameraPosition, physicalDeviceFilterFor(settings.camera));
 
   // The recording quality setting picks the format; without this the camera
   // would record at whatever default the device chooses and the 720p/1080p/4K
@@ -89,18 +87,26 @@ export function CameraFeed({
   // `autoMode` asks the plugin to scale and rotate face bounds natively against
   // the window size we hand it — passing the viewfinder's own size means bounds
   // come back in viewfinder pixels, so no rotation maths is needed on our side.
-  const { detectFaces } = useFaceDetector({
-    performanceMode: 'fast',
-    landmarkMode: 'none',
-    contourMode: 'none',
-    classificationMode: 'none',
+  //
+  // Memoized on the values it actually contains, because `useFaceDetector`
+  // memoizes on the options object's *identity*: an object literal built during
+  // render made it construct a fresh native plugin — and with it a fresh ML Kit
+  // FaceDetector, which nothing ever closes — on every single render, while
+  // also churning `detectFaces` and so rebuilding the frame processor worklet
+  // at the same rate.
+  const faceDetectorOptions = useMemo(() => ({
+    performanceMode: 'fast' as const,
+    landmarkMode: 'none' as const,
+    contourMode: 'none' as const,
+    classificationMode: 'none' as const,
     minFaceSize: 0.1,
     trackingEnabled: true,
-    cameraFacing: devicePositionFor(settings.camera),
+    cameraFacing: cameraPosition,
     autoMode: true,
     windowWidth: viewWidth || 1,
     windowHeight: viewHeight || 1,
-  });
+  }), [cameraPosition, viewWidth, viewHeight]);
+  const { detectFaces } = useFaceDetector(faceDetectorOptions);
 
   const onJsFrame = useRunOnJS((
     detections: FrameDetection[],

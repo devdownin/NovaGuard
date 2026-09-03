@@ -51,6 +51,19 @@ passe donc par une ref (`useLatest`), jamais par une dépendance. Un nouvel éta
 qui change à cette cadence va dans `ViewfinderProvider`, pas dans le fournisseur
 principal — sinon tout l'arbre se redessine à 5 Hz.
 
+**Ce qui entre dans un worklet est recopié, pas partagé.** Le compilateur
+worklets détache la fonction de sa portée et met les variables libres qu'elle
+lit dans un `__closure` transmis par valeur à un second runtime. Une fonction JS
+ordinaire y devient un talon qui lève à l'appel ; un `Set` ou une `Map` n'y
+arrive pas du tout — voyant `X.has(...)`, le compilateur ne remonte que
+`{ has: Set.prototype.has }`, une primitive sur un objet nu. Les deux ont tué
+l'application sur la première image. Donc : toute fonction appelée depuis le
+frame processor porte `'worklet'`, et on n'y capture que des données simples
+(tableaux, objets, nombres) lues en accès *calculé*. `npm test` ne voit rien de
+tout ça — `babel.config.js` coupe le plugin sous Jest — d'où
+`__tests__/workletSafety.test.ts`, qui compile pour de vrai et inspecte les
+closures.
+
 **Une nouvelle référence de tableau est un re-rendu.** `confirmedTracksIfChanged`
 existe pour ça : conserver l'identité quand l'incrustation ne changerait pas.
 

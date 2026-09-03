@@ -1,4 +1,4 @@
-import { ANIMAL_LABELS, COCO_LABELS, PERSON_LABELS } from './labels';
+import { KIND_BY_CLASS_INDEX } from './labels';
 import { FrameDetection } from './types';
 
 export interface InterpretOptions {
@@ -48,11 +48,14 @@ export function interpretDetections(outputs: Float32Array[], options: InterpretO
     const confidence = scores[i];
     if (confidence == null || confidence < options.minConfidence) continue;
 
-    const label = COCO_LABELS[Math.round(classes[i])] ?? '???';
-    let kind: FrameDetection['kind'] | null = null;
-    if (options.detectPerson && PERSON_LABELS.has(label)) kind = 'Personne';
-    else if (options.detectAnimal && ANIMAL_LABELS.has(label)) kind = 'Animal';
+    // Indexed lookup, not a label string: the class index is what the model
+    // emits, and a computed access is also the only member access the worklets
+    // compiler carries into the closure whole (see `KIND_BY_CLASS_INDEX`).
+    // An out-of-range or NaN index reads back undefined, which is the same
+    // "not a kind we record" answer as an ignored class.
+    const kind = KIND_BY_CLASS_INDEX[Math.round(classes[i])];
     if (kind == null) continue;
+    if (kind === 'Personne' ? !options.detectPerson : !options.detectAnimal) continue;
 
     const o = i * 4;
     // Clamp the corners, then derive the size from them. Clamping the origin
