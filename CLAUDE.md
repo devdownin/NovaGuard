@@ -154,6 +154,18 @@ a cassé tous les builds d'APK sans qu'aucune PR verte ne le signale. D'où l'é
 `xmllint` dans le job `check`. Une erreur Android ne peut pas être attrapée par
 tsc, eslint ou jest.
 
+**Et `xmllint` ne lance pas Gradle.** Bien formé n'est pas compilable : un
+manifeste fautif, un module natif qui réclame un autre NDK, une dépendance dont
+le code autolié ne compile pas — rien de tout cela ne se voit avant un vrai run
+Gradle. Le job `changes` de `ci.yml` décide donc, par PR et d'après les fichiers
+touchés, s'il faut construire un APK ; une PR purement JavaScript ne paie
+toujours rien. La liste des chemins exclut volontairement le `Dockerfile` et les
+scripts de build, qu'`android-image.yml` couvre déjà sur PR — les nommer aux
+deux endroits téléchargerait deux fois plusieurs gigaoctets de SDK.
+`__tests__/apkOnPullRequest.test.ts` rejoue la vraie expression extraite du
+workflow : une décision qui vit dans un `grep` de CI ne s'exercerait sinon que
+lors d'un run Actions, c'est-à-dire trop tard.
+
 **Une dépendance qui réclame un autre NDK casse le build.** L'image porte
 exactement ce que `android/build.gradle` épingle, et rien d'autre : un module
 qui demande autre chose fait tenter à AGP un téléchargement dans un SDK en
