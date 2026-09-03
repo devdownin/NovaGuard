@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { color, font } from '../theme';
 import { useAppState } from '../state/AppStateContext';
 import { THIRD_PARTY_LICENSES } from '../constants/app';
+import { formatBytes } from '../recording/library';
 import { Sheet } from './Sheet';
 import { PrimaryOutlineButton } from './OutlineButton';
 import { ValueButton } from './SetupRows';
@@ -14,7 +15,9 @@ const TITLES: Record<'perms' | 'data' | 'licenses', string> = {
 };
 
 export function InfoSheet() {
-  const { info, closeInfo, perms, events, grantPermission } = useAppState();
+  const { info, closeInfo, perms, events, storage: store, storedSize, grantPermission } = useAppState();
+
+  const clipCount = events.filter(e => e.path != null).length;
 
   /**
    * Refusing a permission has to be recoverable here.
@@ -36,9 +39,19 @@ export function InfoSheet() {
     : info === 'licenses'
       ? THIRD_PARTY_LICENSES.map(lib => ({ label: lib.name, note: lib.note, value: lib.license }))
       : [
-        { label: 'Vidéos enregistrées', note: "Dossier privé de l'application", value: `${events.length} fichiers` },
-        { label: 'Vignettes', note: 'Générées localement', value: '2,1 Mo' },
-        { label: 'Journal de détection', note: 'Type, heure, confiance', value: '48 Ko' },
+        // Files, not events: a sighting the encoder produced nothing for is
+        // kept as history and has nothing on disk to count.
+        {
+          label: 'Vidéos enregistrées',
+          note: "Dossier privé de l'application",
+          value: `${clipCount} ${clipCount === 1 ? 'fichier' : 'fichiers'} · ${formatBytes(store.used)}`,
+        },
+        // Measured, both of them. These two rows used to be constants — and one
+        // of them billed 2,1 Mo to a thumbnail cache that exists nowhere in this
+        // repository. The screen that tells the user what is kept about them is
+        // the last place to invent a number.
+        { label: 'Journal de détection', note: 'Type, heure, confiance', value: formatBytes(storedSize.journal) },
+        { label: 'Réglages', note: 'Préférences et compteurs', value: formatBytes(storedSize.settings) },
         { label: 'Envoyé sur un serveur', note: 'Aucune donnée sortante', value: 'Rien' },
       ];
 
