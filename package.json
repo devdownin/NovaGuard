@@ -27,6 +27,7 @@
     "lint": "eslint .",
     "start": "react-native start",
     "test": "jest",
+    "test:e2e": "maestro test .maestro/",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
