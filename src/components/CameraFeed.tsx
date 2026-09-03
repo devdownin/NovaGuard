@@ -197,39 +197,48 @@ export function CameraFeed({
     // own frame rate.
     runAtTargetFps(targetFps, () => {
       'worklet';
-      // Everything analysis does per frame sits inside this `try`, because
-      // outside it VisionCamera hands whatever escapes to `reportFatalError`
-      // and the app closes. A failing detector is a degraded camera; it must
-      // read as a message in the viewfinder, not as the app disappearing.
-      try {
-        // Each `onFrameStage` names the call that comes next, never the one
-        // that just finished: libyuv, LiteRT and ML Kit can all end the
-        // process outright, and a record of the last thing that worked names
-        // everything except the culprit.
-        onFrameStage('resize');
-        // Feed the model the WHOLE frame, uprighted. The previous version let
-        // the plugin centre-crop to a square, which threw away the sides of the
-        // field of view, and left the scene rotated for a portrait-held phone.
-        const resized = resize(frame, {
-          crop: { x: 0, y: 0, width: frame.width, height: frame.height },
-          scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
-          rotation: uprightRotation(frame.orientation),
-          pixelFormat: 'rgb',
-          dataType: 'uint8',
-        });
-        onFrameStage('inference');
-        // The model's 4 outputs are always float32 (see interpretDetections' doc comment).
-        const outputs = model.runSync([resized]) as Float32Array[];
-        const detections = interpretDetections(outputs, { detectPerson, detectAnimal, minConfidence });
-
-        const faces: DetectionBox[] = [];
-        if (autoZoom) {
-          onFrameStage('faces');
-          const detected = detectFaces(frame);
-          for (let i = 0; i < detected.length; i++) {
-            const b = detected[i].bounds;
-            faces.push({ x: b.x / viewW, y: b.y / viewH, width: b.width / viewW, height: b.height / viewH });
+      runAsync(frame, () => {
+        'worklet';
+        // Everything analysis does per frame sits inside this `try`, because
+        // outside it VisionCamera hands whatever escapes to `reportFatalError`
+        // and the app closes. A failing detector is a degraded camera; it must
+        // read as a message in the viewfinder, not as the app disappearing.
+        try {
+          const faces: DetectionBox[] = [];
+          if (autoZoom) {
+            try {
+              const detected = detectFaces(frame);
+              for (let i = 0; i < detected.length; i++) {
+                const b = detected[i]?.bounds;
+                if (b != null) {
+                  faces.push({ x: b.x / viewW, y: b.y / viewH, width: b.width / viewW, height: b.height / viewH });
+                }
+              }
+            } catch {
+              // ML Kit face detection failure on a frame must not break person/animal detection or crash the app.
+            }
           }
+
+          // Feed the model the WHOLE frame, uprighted. The previous version let
+          // the plugin centre-crop to a square, which threw away the sides of the
+          // field of view, and left the scene rotated for a portrait-held phone.
+          const resized = resize(frame, {
+            crop: { x: 0, y: 0, width: frame.width, height: frame.height },
+            scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
+            rotation: uprightRotation(frame.orientation),
+            pixelFormat: 'rgb',
+            dataType: 'uint8',
+          });
+          // The model's 4 outputs are always float32 (see interpretDetections' doc comment).
+          const outputs = model.runSync([resized]) as Float32Array[];
+          const detections = interpretDetections(outputs, { detectPerson, detectAnimal, minConfidence });
+
+          onJsFrame(detections, faces, uprightAspect(frame.width, frame.height, frame.orientation));
+        } catch (e) {
+          // Plain property access, no `instanceof`: the worklet runtime is not
+          // the one this value's prototype came from.
+          const failure = e as { message?: string } | undefined;
+          onFrameError(failure?.message ?? 'erreur inconnue');
         }
 
         onFrameStage('report');
