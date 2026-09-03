@@ -9,21 +9,30 @@ on:
     paths:
       - Dockerfile
       - .dockerignore
+      - scripts/build-apk.sh
+      - scripts/build-apk-in-docker.sh
       - .github/workflows/android-image.yml
   push:
     branches: [main]
     paths:
       - Dockerfile
       - .dockerignore
+      - scripts/build-apk.sh
+      - scripts/build-apk-in-docker.sh
       - .github/workflows/android-image.yml
   workflow_dispatch:
 
 permissions:
   contents: read
+  # Publishing the image is what lets build-apk stop reinstalling the SDK.
+  packages: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}/android-build
 
 jobs:
   image:
@@ -32,8 +41,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Tagged by the Dockerfile's own content, so build-apk asking for the
+      # image its commit describes can only ever get that image — a tag like
+      # `latest` would let a release be built against a Dockerfile it was not
+      # written for.
+      - name: Derive the image tag from the Dockerfile
+        id: tag
+        run: echo "value=${{ hashFiles('Dockerfile') }}" >> "$GITHUB_OUTPUT"
+
       - name: Build the image
-        run: docker build -t novaguard-android:ci .
+        run: docker build -t "${IMAGE}:${{ steps.tag.outputs.value }}" .
 
       # A successful `docker build` only proves the commands exited zero. These
       # assert the pinned components are actually on disk, so a silently
@@ -41,7 +58,7 @@ jobs:
       # build weeks later.
       - name: Assert the pinned toolchain is present
         run: |
-          docker run --rm novaguard-android:ci bash -euo pipefail -c '
+          docker run --rm "${IMAGE}:${{ steps.tag.outputs.value }}" bash -euo pipefail -c '
             java -version
             node --version
             test -d "$ANDROID_HOME/platforms/android-36"
@@ -50,17 +67,10 @@ jobs:
             test -d "$ANDROID_HOME/cmake/3.30.5"
           '
 
-      # The point of the image is that it can produce the APK, so that is what
-      # is checked — not a proxy for it.
-      - name: Build a release APK inside the image
-        run: |
-          docker run --rm \
-            -v "$PWD":/app -w /app \
-            novaguard-android:ci \
-            bash -euo pipefail -c '
-              npm ci --no-audit --no-fund
-              cd android && ./gradlew assembleRelease --no-daemon
-            '
+      # The exact invocation build-apk uses, so publishing an image is gated on
+      # the release path itself having run — not on a proxy for it.
+      - name: Build a release APK the way a release does
+        run: scripts/build-apk-in-docker.sh "${IMAGE}:${{ steps.tag.outputs.value }}"
 
       - name: Upload the APK it produced
         uses: actions/upload-artifact@v4
@@ -69,3 +79,13 @@ jobs:
           path: android/app/build/outputs/apk/release/*.apk
           retention-days: 7
           if-no-files-found: error
+
+      # Only from main: a pull request must not be able to publish the image
+      # that later releases are built from.
+      - name: Publish the image
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push "${IMAGE}:${{ steps.tag.outputs.value }}"
