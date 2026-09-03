@@ -18,6 +18,25 @@ interface Options {
   max: MaxDuration;
   onClip: (clip: Clip) => void;
   onError?: (message: string) => void;
+  /**
+   * Fired when the duration cap expires, just before the clip is cut.
+   *
+   * The cap has to cut the file — an encoder left running produces one
+   * unbounded MP4 — but cutting the file is not the same as ending what is
+   * being filmed. This hook lets the session layer close the clip itself, so
+   * the clip carries its event and the next one opens straight away. The cap
+   * still calls `stop()` afterwards: a handler that does nothing must not turn
+   * the maximum duration into no maximum at all.
+   */
+  onMaxDuration?: () => void;
+  /**
+   * The encoder never answered a stop within {@link FINALIZE_TIMEOUT_MS}.
+   *
+   * `onClip` will not fire, so this is the only notice the caller gets that the
+   * clip it was expecting is not coming — without it, whatever the caller set
+   * aside for that clip (the event it was to carry) is simply dropped.
+   */
+  onAbandoned?: () => void;
 }
 
 /**
@@ -49,7 +68,9 @@ export interface Recorder {
  * promise, and throws if you stop a recording that never started, so the
  * in-flight state lives in a ref that both callbacks and the duration cap read.
  */
-export function useRecorder({ cameraRef, enabled, max, onClip, onError }: Options): Recorder {
+export function useRecorder({
+  cameraRef, enabled, max, onClip, onError, onMaxDuration, onAbandoned,
+}: Options): Recorder {
   const [isRecording, setIsRecording] = useState(false);
   const activeRef = useRef(false);
   /** Set between `stopRecording()` and the callback that answers it. */
@@ -62,8 +83,12 @@ export function useRecorder({ cameraRef, enabled, max, onClip, onError }: Option
   // VisionCamera holding a stale `onClip` from a previous settings value.
   const onClipRef = useRef(onClip);
   const onErrorRef = useRef(onError);
+  const onMaxDurationRef = useRef(onMaxDuration);
+  const onAbandonedRef = useRef(onAbandoned);
   useEffect(() => { onClipRef.current = onClip; }, [onClip]);
   useEffect(() => { onErrorRef.current = onError; }, [onError]);
+  useEffect(() => { onMaxDurationRef.current = onMaxDuration; }, [onMaxDuration]);
+  useEffect(() => { onAbandonedRef.current = onAbandoned; }, [onAbandoned]);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,7 +128,10 @@ export function useRecorder({ cameraRef, enabled, max, onClip, onError }: Option
     try {
       cameraRef.current?.stopRecording();
       stoppingRef.current = true;
-      finalizeTimerRef.current = setTimeout(settle, FINALIZE_TIMEOUT_MS);
+      finalizeTimerRef.current = setTimeout(() => {
+        settle();
+        onAbandonedRef.current?.();
+      }, FINALIZE_TIMEOUT_MS);
       return true;
     } catch {
       settle();
@@ -146,6 +174,10 @@ export function useRecorder({ cameraRef, enabled, max, onClip, onError }: Option
 
     capTimerRef.current = setTimeout(() => {
       capTimerRef.current = null;
+      // Give the session layer the chance to stop the clip itself — that is
+      // what makes the next one part of the same passage. `stop()` no-ops once
+      // a stop is in flight, so it is the guarantee, not a second cut.
+      onMaxDurationRef.current?.();
       stop();
     }, maxDurationMs(max));
     return true;
