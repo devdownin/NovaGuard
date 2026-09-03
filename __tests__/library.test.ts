@@ -6,6 +6,10 @@ import {
   expiredEvents,
   formatBytes,
   LOW_SPACE_BYTES,
+  MIN_FREE_BYTES,
+  minFreeBytes,
+  expectedClipBytes,
+  lowSpaceBytes,
   maxDurationMs,
   nextEventId,
   periodDays,
@@ -85,6 +89,55 @@ describe('setting translations', () => {
   });
 });
 
+/**
+ * The free-space guard used to be a flat 150 Mo, which admitted a clip needing
+ * 2,2 Go. The encoder then ran out of room mid-clip and the passage was lost —
+ * the exact failure the guard exists to prevent.
+ */
+describe('the space a clip is expected to need', () => {
+  const GB = 1024 * MB;
+
+  it('follows the bitrate and the duration', () => {
+    // 20 Mb/s over 15 min, in bytes.
+    expect(expectedClipBytes('4K', '15 min')).toBeCloseTo((20e6 / 8) * 900, 0);
+    // Halving the duration halves the file; the quality ladder only grows it.
+    expect(expectedClipBytes('4K', '5 min') * 3).toBeCloseTo(expectedClipBytes('4K', '15 min'), 0);
+    expect(expectedClipBytes('720p', '1 min')).toBeLessThan(expectedClipBytes('4K', '1 min'));
+  });
+
+  it('demands more free space than the clip will occupy', () => {
+    for (const quality of ['720p', '1080p', '4K'] as const) {
+      for (const max of ['1 min', '2 min', '5 min', '10 min', '15 min'] as const) {
+        // Equal would be a guard that lets a clip fill the volume exactly.
+        expect(minFreeBytes(quality, max)).toBeGreaterThan(expectedClipBytes(quality, max));
+      }
+    }
+  });
+
+  it('scales past the old flat threshold where that threshold was wrong', () => {
+    // The two settings that broke it: a single clip an order of magnitude
+    // larger than the 150 Mo the guard used to ask for.
+    expect(minFreeBytes('4K', '15 min')).toBeGreaterThan(2 * GB);
+    expect(minFreeBytes('4K', '5 min')).toBeGreaterThan(750 * MB);
+    // And it must not have quietly loosened the modest settings.
+    expect(minFreeBytes('1080p', '2 min')).toBeGreaterThan(MIN_FREE_BYTES);
+  });
+
+  it('never starts auto-delete below the mark a recording needs', () => {
+    for (const quality of ['720p', '1080p', '4K'] as const) {
+      for (const max of ['1 min', '15 min'] as const) {
+        // Otherwise a sweep deletes the user's history and the camera still
+        // refuses to record: the worst of both.
+        expect(lowSpaceBytes(quality, max)).toBeGreaterThanOrEqual(minFreeBytes(quality, max));
+      }
+    }
+  });
+
+  it('leaves the modest settings on the existing low-space mark', () => {
+    expect(lowSpaceBytes('1080p', '2 min')).toBe(LOW_SPACE_BYTES);
+  });
+});
+
 describe('expiredEvents', () => {
   const now = Date.now();
 
@@ -130,11 +183,18 @@ describe('eventsToReclaim', () => {
 
 describe('bytesToReclaim', () => {
   it('asks for nothing while there is room', () => {
-    expect(bytesToReclaim(LOW_SPACE_BYTES + MB)).toBe(0);
+    expect(bytesToReclaim(LOW_SPACE_BYTES + MB, LOW_SPACE_BYTES)).toBe(0);
   });
 
   it('asks for the shortfall below the low-space mark', () => {
-    expect(bytesToReclaim(LOW_SPACE_BYTES - 20 * MB)).toBe(20 * MB);
+    expect(bytesToReclaim(LOW_SPACE_BYTES - 20 * MB, LOW_SPACE_BYTES)).toBe(20 * MB);
+  });
+
+  it('reclaims against the mark it is given, not a constant', () => {
+    // The mark scales with the clip settings; reclaiming to a fixed one would
+    // free space a 4K clip still cannot fit into.
+    const target = lowSpaceBytes('4K', '15 min');
+    expect(bytesToReclaim(LOW_SPACE_BYTES, target)).toBe(target - LOW_SPACE_BYTES);
   });
 });
 

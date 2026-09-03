@@ -18,8 +18,8 @@ import { FrameDetection } from '../ml/types';
 import { confirmedTracksIfChanged, primaryTrack, Track, updateTracks } from '../ml/tracker';
 import { Clip, useRecorder } from '../recording/useRecorder';
 import {
-  bytesToReclaim, clipFileName, clipOutcome, eventsToReclaim, expiredEvents, MIN_FREE_BYTES,
-  nextEventId, periodRange, postRollMs, sameDay, todayCount, totalBytes,
+  bytesToReclaim, clipFileName, clipOutcome, eventsToReclaim, expiredEvents, lowSpaceBytes,
+  minFreeBytes, nextEventId, periodRange, postRollMs, sameDay, todayCount, totalBytes,
 } from '../recording/library';
 import {
   deleteFile, deleteFiles, orphanedRecordings, renameRecording, volumeSpace,
@@ -457,6 +457,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
    * `JSON.parse` that restores it from disk.
    */
   const lastEventIdRef = useRef(0);
+  // Everything `reportDetections` reads that changes while it runs goes through
+  // a ref, so its identity — and the frame processor worklet's — survives. Free
+  // space comes from the measurement, not from `store`, which folds in a value
+  // derived from `events` that this path has no use for. Declared up here
+  // because the recording callbacks below read them too.
+  const freeSpaceRef = useLatest(volume.free);
+  const settingsRef = useLatest(settings);
   /**
    * The recorder's own `start` and `stop`, reached through refs.
    *
@@ -466,6 +473,21 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
    */
   const startRecordingRef = useRef<() => boolean>(() => false);
   const stopRecordingRef = useRef<() => boolean>(() => false);
+
+  /**
+   * Whether the volume can hold the clip that is about to be written.
+   *
+   * Both the opening of a session and the roll into the next clip ask this, and
+   * they must ask the same question: a passage that outlives its cap used to
+   * re-check space only because the session was rebuilt at every cut, so making
+   * the session survive the cut quietly removed the check from long passages.
+   * A free space of 0 means "not measured yet", not "full".
+   */
+  const hasRoomToRecord = useCallback(() => {
+    const free = freeSpaceRef.current;
+    if (free <= 0) return true;
+    return free >= minFreeBytes(settingsRef.current.quality, settingsRef.current.max);
+  }, [freeSpaceRef, settingsRef]);
 
   const commitEvent = useCallback((
     kind: DetectionKind, dur: number, c: number, clip: Clip | null, at: number = Date.now(),
@@ -516,8 +538,16 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
    * a clean slate to reopen from.
    */
   const openNextSegment = useCallback(() => {
+    // A long passage fills the disk like any other write. Closing the session
+    // hands the next frame back to the ordinary opening path, which is the one
+    // place that decides what a refusal looks like.
+    if (!hasRoomToRecord()) {
+      setRecError('Espace insuffisant pour enregistrer');
+      clearSession();
+      return;
+    }
     if (!startRecordingRef.current()) clearSession();
-  }, [clearSession]);
+  }, [clearSession, hasRoomToRecord]);
 
   /**
    * Files the finished clip against the detection that caused it, under a name
@@ -533,10 +563,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     pendingRef.current = null;
 
     const meta = pending ?? (sessionKindRef.current != null ? sessionMeta() : null);
-    // The duration cap cut this clip with the subject still in frame. The
-    // passage carries on, so the session is still open and the next clip opens
-    // now — `rollSegment` has already moved the segment window forward.
-    const continues = pending?.rollover === true && sessionKindRef.current != null;
 
     switch (clipOutcome(meta != null, clip.bytes)) {
       case 'discard':
@@ -551,21 +577,27 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         if (!pending) clearSession();
         deleteFile(clip.path);
         commitEvent(meta!.kind, meta!.dur, meta!.conf, null);
-        if (continues) openNextSegment();
         return;
 
       case 'attach': {
         if (!pending) clearSession();
-        // Before the rename, not after: the encoder is free the moment the clip
-        // landed, and every millisecond spent elsewhere is footage nobody has.
-        if (continues) openNextSegment();
         const at = Date.now();
         renameRecording(clip.path, clipFileName(meta!.kind, at)).then(path => {
           commitEvent(meta!.kind, meta!.dur, meta!.conf, { ...clip, path }, at);
         });
       }
     }
-  }, [clearSession, commitEvent, openNextSegment, sessionMeta]);
+  }, [clearSession, commitEvent, sessionMeta]);
+
+  /**
+   * The encoder has released the camera. If the cap cut this clip with the
+   * subject still in frame, the next one opens here — before the byte count is
+   * read back, which is a bridge round trip nobody is being filmed during.
+   */
+  const onEncoderFree = useCallback(() => {
+    const pending = pendingRef.current;
+    if (pending?.rollover && sessionKindRef.current != null) openNextSegment();
+  }, [openNextSegment]);
 
   /**
    * The clip a stop was waiting on never arrived — the encoder did not answer
@@ -616,6 +648,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     onError: setRecError,
     onMaxDuration: rollSegment,
     onAbandoned: onClipAbandoned,
+    onEncoderFree,
   });
   // Depend on the two callbacks rather than the recorder object: it is a fresh
   // literal every render, and `reportDetections` feeds the frame processor's
@@ -626,13 +659,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   // can expire, before the recorder has been started — which needs a commit.
   useEffect(() => { startRecordingRef.current = startRecording; }, [startRecording]);
   useEffect(() => { stopRecordingRef.current = stopRecording; }, [stopRecording]);
-
-  // Same reason: everything `reportDetections` reads that changes while it runs
-  // goes through a ref, so its identity — and the worklet's — survives. Free
-  // space comes from the measurement, not from `store`, which folds in a value
-  // derived from `events` that this path has no use for.
-  const freeSpaceRef = useLatest(volume.free);
-  const settingsRef = useLatest(settings);
 
   const cancelPostRoll = useCallback(() => {
     if (postRollRef.current) {
@@ -700,8 +726,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         viewfinder.current?.setRecSec(0);
         // Refuse to start on a nearly full volume rather than letting the
         // encoder fail mid-clip and lose the whole passage.
-        const free = freeSpaceRef.current;
-        if (free > 0 && free < MIN_FREE_BYTES) {
+        if (!hasRoomToRecord()) {
           setRecError('Espace insuffisant pour enregistrer');
         } else {
           setRecError(null);
@@ -733,7 +758,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         endSession();
       }, postRollMs(settingsRef.current.post));
     }
-  }, [cancelPostRoll, endSession, freeSpaceRef, settingsRef, startRecording]);
+  }, [cancelPostRoll, endSession, hasRoomToRecord, settingsRef, startRecording]);
 
   const toggleMonitoring = useCallback(() => {
     // Closing the session has to happen outside the updater: React may invoke
@@ -821,7 +846,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     setVolume(space);
 
     if (!settingsRef.current.autoDel || space.free <= 0) return;
-    const needed = bytesToReclaim(space.free);
+    const needed = bytesToReclaim(
+      space.free,
+      lowSpaceBytes(settingsRef.current.quality, settingsRef.current.max),
+    );
     if (needed <= 0) return;
 
     const victims = eventsToReclaim(eventsRef.current, needed);

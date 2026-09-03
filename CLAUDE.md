@@ -95,6 +95,31 @@ partagée dont le compilateur recopie le `.value` — les deux arrêteraient la
 trace en silence. C'est le côté JS qui cesse d'écrire, dès qu'une image passe
 entière.
 
+**Entre deux clips, personne n'est filmé.** La durée maximale coupe un fichier
+sans couper le passage : la session survit, et le clip suivant s'ouvre dès que
+l'encodeur rend la caméra. VisionCamera n'offre pas de segmentation sans
+couture, donc ce trou — la finalisation du fichier — ne peut pas être supprimé.
+Il peut en revanche être élargi par accident, et il l'était : la taille du clip
+était relue sur disque *avant* de rouvrir, ajoutant un aller-retour par le pont
+natif à une fenêtre où rien n'est enregistré. D'où `onEncoderFree`, annoncé dans
+`onRecordingFinished` avant le `stat()`, distinct de `onClip` qui a besoin du
+compte d'octets. Tout ce qu'on ajoute entre la fin d'un clip et le début du
+suivant se paie en images perdues ; la mesure réelle sur appareil n'a jamais été
+faite.
+
+**Le garde-fou d'espace disque doit tourner à chaque clip, pas à chaque
+session.** Il ne s'exécutait qu'à l'ouverture d'une session, ce qui suffisait
+tant qu'une coupure de durée maximale détruisait la session — l'image suivante
+repassait par là. Faire survivre la session à la coupure a donc silencieusement
+retiré le contrôle des passages longs, c'est-à-dire précisément des
+enregistrements capables de remplir un disque. `hasRoomToRecord` est appelé aux
+deux endroits, et les seuils ne sont plus des constantes plates : 150 Mo
+laissaient démarrer un clip de 2,2 Go (15 min en 4K). `minFreeBytes` et
+`lowSpaceBytes` dérivent de `qualityBitRate × maxDurationMs`, et
+l'auto-suppression ne récupère jamais jusqu'à une marque qui refuserait encore
+d'enregistrer — supprimer l'historique *et* rester incapable de filmer est le
+pire des deux.
+
 **Une nouvelle référence de tableau est un re-rendu.** `confirmedTracksIfChanged`
 existe pour ça : conserver l'identité quand l'incrustation ne changerait pas.
 

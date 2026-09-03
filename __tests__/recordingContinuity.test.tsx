@@ -20,11 +20,13 @@ import * as fs from '@dr.pogodin/react-native-fs';
 import { AppState, mountProvider } from '../testing/mountProvider';
 import { useViewfinderState, ViewfinderState } from '../src/state/AppStateContext';
 import { notifyDetection } from '../src/surveillance/foregroundService';
-import { maxDurationMs, postRollMs } from '../src/recording/library';
+import { maxDurationMs, minFreeBytes, postRollMs } from '../src/recording/library';
 import { FINALIZE_TIMEOUT_MS } from '../src/recording/useRecorder';
 import { DEFAULT_TRACKER_OPTIONS } from '../src/ml/tracker';
 import { FrameDetection } from '../src/ml/types';
 import { defaultSettings } from '../src/state/defaults';
+
+const NEEDED_BYTES = minFreeBytes(defaultSettings.quality, defaultSettings.max);
 
 jest.mock('../src/surveillance/foregroundService');
 
@@ -41,6 +43,13 @@ const FRAME_MS = 1000;
 
 const person = (x: number): FrameDetection =>
   ({ kind: 'Personne', confidence: 0.9, box: { x, y: 0.3, width: 0.2, height: 0.5 } });
+
+/** What `getFSInfo` reports until a test says otherwise. */
+function reportFreeSpace(free: number) {
+  mockFs.getFSInfo.mockResolvedValue({
+    freeSpace: free, totalSpace: NEEDED_BYTES * 20, freeSpaceEx: free, totalSpaceEx: NEEDED_BYTES * 20,
+  } as never);
+}
 
 /** Captures VisionCamera's callbacks so a test can land the clip itself. */
 function fakeCamera() {
@@ -142,6 +151,9 @@ beforeEach(async () => {
   mockFs.unlink.mockResolvedValue(undefined);
   // A clip with bytes on disk, so the outcome is "attach" and not "event-only".
   mockFs.stat.mockResolvedValue({ size: 8_000_000 } as never);
+  // A volume with room to spare. `free` of 0 means "not measured yet", so a
+  // test that left the default would never exercise the space guard at all.
+  reportFreeSpace(NEEDED_BYTES * 10);
 });
 
 afterEach(() => {
@@ -274,6 +286,28 @@ it('keeps the clip when the subject leaves while the cut is still in flight', as
  * the session stays open, and `reportDetections` only starts a recording when
  * it *opens* one — so nothing would ever try again.
  */
+/**
+ * The other way a cut clip never arrives. A disk that fills mid-clip reports an
+ * encoder error rather than handing anything back, so the event the cut was
+ * holding would sit in `pendingRef` forever — and the passage would run on with
+ * nothing being written.
+ */
+it('still writes the event when the encoder errors on the cut', async () => {
+  const p = await passage();
+  await p.watch(CAP_MS);
+
+  await ReactTestRenderer.act(async () => {
+    p.camera.last().onRecordingError({ message: 'no space left on device' });
+  });
+  await settle();
+
+  expect(p.state.recError).toBe('no space left on device');
+  expect(p.state.events).toHaveLength(1);
+  expect(p.state.events[0].path).toBeNull();
+  // And the passage is either recording again or closed — never open and idle.
+  expect(p.camera.startRecording).toHaveBeenCalledTimes(2);
+});
+
 it('closes the session when the next clip cannot be opened', async () => {
   const p = await passage();
   await p.watch(CAP_MS);
@@ -289,6 +323,68 @@ it('closes the session when the next clip cannot be opened', async () => {
   await p.see();
   expect(p.state.det).toBe('Personne');
   expect(p.camera.startRecording).toHaveBeenCalledTimes(3);
+});
+
+/**
+ * Between the encoder releasing the camera and the next clip starting, nobody
+ * is being filmed. Reading the finished clip's size — a round trip over the
+ * bridge — used to sit inside that window for no reason: the byte count is
+ * needed to file the event, not to start recording again.
+ */
+it('opens the next clip before reading the finished one back from disk', async () => {
+  const p = await passage();
+  await p.watch(CAP_MS);
+
+  // A `stat()` this test resolves by hand, standing in for a slow bridge.
+  let finishStat!: (info: unknown) => void;
+  mockFs.stat.mockReturnValueOnce(new Promise(resolve => { finishStat = resolve; }) as never);
+
+  await ReactTestRenderer.act(async () => {
+    p.camera.last().onRecordingFinished({ path: '/clips/a.mp4', duration: CAP_MS / 1000 });
+  });
+
+  // Recording again already, with the size still outstanding.
+  expect(p.camera.startRecording).toHaveBeenCalledTimes(2);
+  expect(p.state.events).toHaveLength(0);
+
+  await ReactTestRenderer.act(async () => { finishStat({ size: 8_000_000 }); });
+  await settle();
+  expect(p.state.events).toHaveLength(1);
+  expect(p.state.events[0].bytes).toBe(8_000_000);
+});
+
+/**
+ * The guard that refuses to record on a nearly full volume ran only when a
+ * session *opened*. Making the session survive the duration cap therefore took
+ * it out of long passages entirely — the very recordings most able to fill a
+ * disk.
+ */
+it('refuses to open the next clip once the volume has filled up', async () => {
+  const p = await passage();
+  // Not enough for another clip. The sweep re-measures every DISK_SWEEP_MS, so
+  // the passage itself carries the new figure into the provider.
+  reportFreeSpace(NEEDED_BYTES - 1);
+  await p.watch(CAP_MS);
+  await p.land('/clips/a.mp4', CAP_MS / 1000);
+
+  expect(p.camera.startRecording).toHaveBeenCalledTimes(1);
+  expect(p.state.recError).toBe('Espace insuffisant pour enregistrer');
+  // The clip that was already written is still filed — refusing the next one
+  // must not cost the one just finished.
+  expect(p.state.events).toHaveLength(1);
+  expect(p.state.events[0].path).toMatch(/\/Personne_[\d-]+_[\d-]+\.mp4$/);
+});
+
+it('keeps rolling while there is room for another clip', async () => {
+  const p = await passage();
+  // One byte the other side of the same line: without this the test above
+  // would pass on a guard that simply refused everything.
+  reportFreeSpace(NEEDED_BYTES);
+  await p.watch(CAP_MS);
+  await p.land('/clips/a.mp4', CAP_MS / 1000);
+
+  expect(p.camera.startRecording).toHaveBeenCalledTimes(2);
+  expect(p.state.recError).toBeNull();
 });
 
 it('still writes the event when the encoder never answers the cut', async () => {

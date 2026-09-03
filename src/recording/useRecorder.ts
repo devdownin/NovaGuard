@@ -37,6 +37,15 @@ interface Options {
    * aside for that clip (the event it was to carry) is simply dropped.
    */
   onAbandoned?: () => void;
+  /**
+   * The encoder has released the camera, before the clip's size is read back.
+   *
+   * `onClip` cannot serve this purpose: it waits on a `stat()` round trip over
+   * the bridge, and between a stop and the next start that wait is dead air —
+   * seconds of a passage nobody is filming. A caller continuing a recording
+   * starts the next clip from here and lets the byte count catch up.
+   */
+  onEncoderFree?: () => void;
 }
 
 /**
@@ -69,7 +78,7 @@ export interface Recorder {
  * in-flight state lives in a ref that both callbacks and the duration cap read.
  */
 export function useRecorder({
-  cameraRef, enabled, max, onClip, onError, onMaxDuration, onAbandoned,
+  cameraRef, enabled, max, onClip, onError, onMaxDuration, onAbandoned, onEncoderFree,
 }: Options): Recorder {
   const [isRecording, setIsRecording] = useState(false);
   const activeRef = useRef(false);
@@ -85,10 +94,12 @@ export function useRecorder({
   const onErrorRef = useRef(onError);
   const onMaxDurationRef = useRef(onMaxDuration);
   const onAbandonedRef = useRef(onAbandoned);
+  const onEncoderFreeRef = useRef(onEncoderFree);
   useEffect(() => { onClipRef.current = onClip; }, [onClip]);
   useEffect(() => { onErrorRef.current = onError; }, [onError]);
   useEffect(() => { onMaxDurationRef.current = onMaxDuration; }, [onMaxDuration]);
   useEffect(() => { onAbandonedRef.current = onAbandoned; }, [onAbandoned]);
+  useEffect(() => { onEncoderFreeRef.current = onEncoderFree; }, [onEncoderFree]);
 
   useEffect(() => {
     let cancelled = false;
@@ -154,6 +165,9 @@ export function useRecorder({
         onRecordingFinished: (video: VideoFile) => {
           settle();
           clearCap();
+          // Announced before the size is read, and deliberately: the camera is
+          // free now, and anything done first is footage the next clip misses.
+          onEncoderFreeRef.current?.();
           // `VideoFile` has no size, so the real byte count is read back from
           // disk once the encoder has closed the file.
           fileSize(video.path).then(bytes => {
@@ -164,6 +178,10 @@ export function useRecorder({
           settle();
           clearCap();
           onErrorRef.current?.(error.message);
+          // No clip is coming from this one either — a caller holding an event
+          // for it would otherwise wait forever. A recording that was never
+          // stopped has nothing set aside, so this is a no-op there.
+          onAbandonedRef.current?.();
         },
       });
     } catch (e) {
