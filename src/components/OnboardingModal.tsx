@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { color, font, radius, shadow } from '../theme';
 import { useAppState } from '../state/AppStateContext';
@@ -47,7 +47,16 @@ export function OnboardingModal() {
   return (
     <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={() => {}}>
       <LinearGradient colors={['rgba(16,18,32,0.9)', 'rgba(16,18,32,0.98)']} style={styles.backdrop}>
-        <View style={styles.panel}>
+        {/* Scrollable, because this panel is taller than a landscape window:
+            the backdrop pins it to the bottom, so anything that does not fit —
+            the headline, and on the second step the camera row every other
+            permission is gated behind — is cut off the top with no way to
+            reach it. */}
+        <ScrollView
+          bounces={false}
+          style={styles.panelScroll}
+          contentContainerStyle={styles.panel}
+        >
           {onb === 'intro' && (
             <View>
               <Text style={styles.kicker}>BIENVENUE</Text>
@@ -128,7 +137,7 @@ export function OnboardingModal() {
               />
             </View>
           )}
-        </View>
+        </ScrollView>
       </LinearGradient>
     </Modal>
   );
@@ -138,6 +147,10 @@ const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
     justifyContent: 'flex-end',
+  },
+  panelScroll: {
+    flexGrow: 0,
+    maxHeight: '92%',
   },
   panel: {
     padding: 20,

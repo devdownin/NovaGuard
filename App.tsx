@@ -17,12 +17,14 @@ import { InfoSheet } from './src/components/InfoSheet';
 import { OnboardingModal } from './src/components/OnboardingModal';
 import { ConfirmDialog } from './src/components/ConfirmDialog';
 import { SplashScreen, SPLASH_MIN_DURATION_MS } from './src/components/SplashScreen';
+import { useLandscape } from './src/utils/useLandscape';
 
 function AppShell() {
   const {
     hydrated, tab, confirmDelete, cancelDelete, doDelete,
     confirmWipe, cancelWipe, doWipe, events,
   } = useAppState();
+  const landscape = useLandscape();
 
   // Keeps the splash up for a minimum stretch so its progress bar reads as
   // real feedback instead of a flash, even when hydration itself is instant.
@@ -36,12 +38,17 @@ function AppShell() {
     return <SplashScreen />;
   }
 
+  // Landscape puts the nav on the left and the screen beside it, so the tab
+  // bar stops eating the short axis. Order in the tree is order on screen.
   return (
-    <View style={styles.root}>
-      {tab === 'cam' && <SurveillanceScreen />}
-      {tab === 'hist' && <HistoryScreen />}
-      {tab === 'setup' && <SetupScreen />}
-      <TabBar />
+    <View style={[styles.root, landscape && styles.rootLandscape]}>
+      {landscape && <TabBar />}
+      <View style={styles.screenArea}>
+        {tab === 'cam' && <SurveillanceScreen />}
+        {tab === 'hist' && <HistoryScreen />}
+        {tab === 'setup' && <SetupScreen />}
+      </View>
+      {!landscape && <TabBar />}
 
       <VideoDetailSheet />
       <InfoSheet />
@@ -78,7 +85,10 @@ function App() {
           ignores the prop. The strip behind the status bar is painted by the
           SafeAreaView below instead. */}
       <StatusBar barStyle="light-content" translucent />
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
+      {/* `left`/`right` for landscape: a display cutout sits on one of the
+          short sides once the phone is turned, and without them the brand row
+          and the tab rail run underneath it. Both insets are 0 in portrait. */}
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         <AppStateProvider>
           <AppShell />
         </AppStateProvider>
@@ -95,6 +105,12 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: color.bg,
+  },
+  rootLandscape: {
+    flexDirection: 'row',
+  },
+  screenArea: {
+    flex: 1,
   },
 });
 

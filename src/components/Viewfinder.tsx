@@ -11,7 +11,15 @@ import { CameraFeed } from './CameraFeed';
 import { DetectionOverlay } from './DetectionOverlay';
 import { LiveClock } from './LiveClock';
 
-function ScanBeam() {
+const BEAM_HEIGHT = 70;
+
+/**
+ * `height` is the measured frame, not a literal: the sweep used to end at a
+ * hardcoded 400, which is roughly a portrait viewfinder. Turned sideways the
+ * frame is about half that, so the beam ran off the bottom and spent most of
+ * the loop out of sight.
+ */
+function ScanBeam({ height }: { height: number }) {
   const y = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -22,7 +30,7 @@ function ScanBeam() {
     return () => loop.stop();
   }, [y]);
 
-  const translateY = y.interpolate({ inputRange: [0, 1], outputRange: [-70, 400] });
+  const translateY = y.interpolate({ inputRange: [0, 1], outputRange: [-BEAM_HEIGHT, height] });
 
   return (
     <Animated.View style={[styles.scanBeam, { transform: [{ translateY }] }]} pointerEvents="none">
@@ -166,7 +174,7 @@ export function Viewfinder() {
         <DetectionOverlay viewWidth={size.width} viewHeight={size.height} />
       </Animated.View>
 
-      {monitoring && <ScanBeam />}
+      {monitoring && size.height > 0 && <ScanBeam height={size.height} />}
 
       <View style={styles.overlayChip}>
         <View style={[styles.overlayDot, { backgroundColor: overlayDotColor }]} />
@@ -254,7 +262,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    height: 70,
+    height: BEAM_HEIGHT,
   },
   overlayChip: {
     position: 'absolute',
