@@ -211,6 +211,20 @@ valoir `unknown` sur appareil : seul un `background` explicite compte comme
 caché, parce que se tromper dans l'autre sens éteint l'aperçu d'une application
 qu'on est en train de regarder.
 
+**Une rotation ne remonte rien.** L'activité déclare `orientation|screenSize`
+dans ses `configChanges` : Android ne recrée pas l'application quand le
+téléphone est tourné, donc une dimension lue une fois — `Dimensions.get` au
+premier rendu — reste celle du lancement pour toujours. L'orientation se lit
+par `useLandscape` (au-dessus de `useWindowDimensions`), et chaque composant la
+lit pour lui-même : le shell, le rail de navigation et l'écran affiché sont
+trois abonnés distincts du même évènement. Deux conséquences à ne pas reperdre :
+`numColumns` d'une `FlatList` ne peut pas changer sans changer aussi sa `key`
+(RN lève un invariant), et une valeur d'animation initialisée avec la hauteur de
+la fenêtre doit être **réarmée à l'ouverture**, pas à la construction du
+composant. `__tests__/landscape.test.tsx` tourne un vrai `<App />` dans une
+fenêtre couchée et le fait pivoter en cours de route, parce que c'est le seul
+scénario où les trois abonnés répondent en même temps.
+
 **Une nouvelle référence de tableau est un re-rendu.** `confirmedTracksIfChanged`
 existe pour ça : conserver l'identité quand l'incrustation ne changerait pas.
 

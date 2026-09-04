@@ -6,6 +6,7 @@ import { HistoryFilter } from '../state/types';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { PeriodDropdown } from '../components/PeriodDropdown';
 import { EventCard } from '../components/EventCard';
+import { useLandscape } from '../utils/useLandscape';
 
 const FILTER_OPTIONS: { label: string; value: HistoryFilter }[] = [
   { label: 'Toutes', value: 'Toutes' },
@@ -22,6 +23,7 @@ export function HistoryScreen() {
     filter, setFilter, period, setPeriod, periodOpen, togglePeriodOpen, selectEvent,
   } = useAppState();
   const { shown } = useFilteredEvents();
+  const landscape = useLandscape();
 
   return (
     <View style={styles.screen}>
@@ -47,9 +49,16 @@ export function HistoryScreen() {
       <FlatList
         data={shown}
         keyExtractor={e => String(e.id)}
-        contentContainerStyle={styles.list}
+        // A card is a wide, short row: one per line wastes most of a landscape
+        // window, so it goes to two columns there. `numColumns` cannot change
+        // on a live list — hence the key, which remounts it on rotation.
+        key={landscape ? 'grid' : 'list'}
+        numColumns={landscape ? 2 : 1}
+        contentContainerStyle={[styles.list, landscape && styles.listGrid]}
         renderItem={({ item }) => (
-          <EventCard event={item} onPress={() => selectEvent(item.id)} />
+          <View style={landscape ? styles.gridCell : undefined}>
+            <EventCard event={item} onPress={() => selectEvent(item.id)} />
+          </View>
         )}
         ItemSeparatorComponent={ItemSeparator}
         ListEmptyComponent={
@@ -98,6 +107,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingBottom: 14,
     flexGrow: 1,
+  },
+  // The 4 dp each cell adds back is taken off the list's own padding, so the
+  // outer margin stays the 14 dp it is in portrait.
+  listGrid: {
+    paddingHorizontal: 10,
+  },
+  // `maxWidth` so a lone last card keeps a column's width instead of being
+  // stretched across the whole row by `flex`.
+  gridCell: {
+    flex: 1,
+    maxWidth: '50%',
+    paddingHorizontal: 4,
   },
   empty: {
     paddingVertical: 46,

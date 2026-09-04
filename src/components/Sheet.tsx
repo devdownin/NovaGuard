@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import {
-  Animated, Dimensions, Modal, Pressable, ScrollView, StyleSheet, View,
+  Animated, Modal, Pressable, ScrollView, StyleSheet, useWindowDimensions, View,
 } from 'react-native';
 import { color, shadow } from '../theme';
 
@@ -12,7 +12,10 @@ interface SheetProps {
 }
 
 export function Sheet({ visible, onClose, maxHeightPercent = 88, children }: SheetProps) {
-  const screenHeight = Dimensions.get('window').height;
+  // Re-read on every render rather than captured once: the window is half as
+  // tall after a rotation, and a sheet opened from the stale value started its
+  // slide from far below the screen — or, closing, stopped short of leaving it.
+  const screenHeight = useWindowDimensions().height;
   const translateY = useRef(new Animated.Value(screenHeight)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const [rendered, setRendered] = React.useState(visible);
@@ -20,6 +23,9 @@ export function Sheet({ visible, onClose, maxHeightPercent = 88, children }: She
   useEffect(() => {
     if (visible) {
       setRendered(true);
+      // The ref holds whatever the window was at first mount; an open always
+      // starts from the current one.
+      translateY.setValue(screenHeight);
       Animated.parallel([
         Animated.timing(backdropOpacity, { toValue: 1, duration: 160, useNativeDriver: true }),
         Animated.spring(translateY, {

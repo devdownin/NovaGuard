@@ -14,6 +14,7 @@ import { Switch } from '../components/Switch';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { PrimaryOutlineButton, SecondaryOutlineButton } from '../components/OutlineButton';
 import { ShieldCheckIcon } from '../components/icons';
+import { useLandscape } from '../utils/useLandscape';
 
 const SENS_OPTIONS: { label: string; value: Sensitivity }[] = [
   { label: 'Basse', value: 'Basse' },
@@ -34,6 +35,7 @@ const SENS_HINT: Record<Sensitivity, string> = {
 
 export function SetupScreen() {
   const s = useAppState();
+  const landscape = useLandscape();
   const { settings, events, storage: store, clipGap } = s;
 
   // Share of the whole volume taken by NovaGuard's own clips. Kept visible at a
@@ -45,7 +47,12 @@ export function SetupScreen() {
   return (
     <View style={styles.screen}>
       <Text style={styles.title}>Setup</Text>
-      <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+      {/* Landscape is ~800 dp wide: full-bleed rows would put a switch a whole
+          screen away from the label it belongs to. */}
+      <ScrollView
+        contentContainerStyle={[styles.list, landscape && styles.listCentered]}
+        showsVerticalScrollIndicator={false}
+      >
 
         <CollapsibleSection title="SURVEILLANCE" expanded={settings.exp.surv} onToggle={() => s.toggleSection('surv')}>
           <SettingRow label="Caméra utilisée">
@@ -256,6 +263,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingBottom: 18,
     gap: 8,
+  },
+  listCentered: {
+    width: '100%',
+    maxWidth: 620,
+    alignSelf: 'center',
   },
   subBlock: {
     paddingVertical: 12,
