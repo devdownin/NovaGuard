@@ -32,7 +32,11 @@ local.properties
 *.hprof
 .cxx/
 *.keystore
+*.jks
 !debug.keystore
+# Upload-key credentials. The debug keystore above is committed on purpose —
+# it signs nothing anyone can publish; this file signs everything they can.
+android/keystore.properties
 .kotlin/
 
 # node.js

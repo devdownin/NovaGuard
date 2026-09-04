@@ -56,8 +56,61 @@ react {
 
 /**
  * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
+ *
+ * Left off deliberately. Every heavy dependency here reaches native code by
+ * name — VisionCamera's frame processors, LiteRT, ML Kit, the worklets runtime
+ * — so R8 without rules written and *verified on a device* trades a smaller
+ * download for a release that crashes where no unit test can see it. Turning it
+ * on is a change that has to be proved on hardware, not a flag to flip on the
+ * way to the Play Console.
  */
 def enableProguardInReleaseBuilds = false
+
+/**
+ * Upload-key credentials, from outside this repository.
+ *
+ * Play refuses a debug-signed upload, and the debug keystore below is committed
+ * — every checkout of this project has the same private key, so anything it
+ * signs is signed by everyone. Real credentials come from
+ * `~/.gradle/gradle.properties`, from `android/keystore.properties` (git-ignored),
+ * or from the environment on CI; nothing here is ever committed.
+ *
+ * Absent, a release APK still builds and installs on a test device — that path
+ * predates the store and stays — but `bundleRelease` refuses to produce an AAB,
+ * since the only thing an AAB is for is being uploaded to Play. See the check
+ * at the bottom of this file.
+ */
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
+def uploadKey(String name) {
+    def value = keystoreProperties.getProperty(name)
+        ?: project.findProperty(name)
+        ?: System.getenv(name.toUpperCase().replace('.', '_'))
+    return value?.toString()?.trim() ?: null
+}
+
+def uploadStoreFile = uploadKey('novaguard.uploadStoreFile')
+def uploadStorePassword = uploadKey('novaguard.uploadStorePassword')
+def uploadKeyAlias = uploadKey('novaguard.uploadKeyAlias')
+def uploadKeyPassword = uploadKey('novaguard.uploadKeyPassword')
+def hasUploadKey = uploadStoreFile != null
+
+/**
+ * The version, from the one place that already carried it.
+ *
+ * `versionName` is read from package.json rather than repeated here: two
+ * literals for one number is how a store listing ends up disagreeing with the
+ * changelog. `versionCode` is Play's own counter — it has to grow with every
+ * upload and has nothing to do with the marketing version — so it lives in
+ * `android/gradle.properties`, and CI can override it with
+ * `-PnovaguardVersionCode=`.
+ */
+def packageJson = new groovy.json.JsonSlurper().parseText(
+    file("../../package.json").getText("UTF-8"))
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -82,8 +135,8 @@ android {
         applicationId "com.novaguard"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0.0"
+        versionCode ((project.findProperty('novaguardVersionCode') ?: '1') as int)
+        versionName packageJson.version
     }
     signingConfigs {
         debug {
@@ -92,17 +145,49 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        if (hasUploadKey) {
+            upload {
+                storeFile file(uploadStoreFile)
+                storePassword uploadStorePassword
+                keyAlias uploadKeyAlias
+                keyPassword uploadKeyPassword
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // The upload key when one is configured, the committed debug key
+            // otherwise — which builds an APK someone can sideload onto a test
+            // device, and which `bundleRelease` refuses to hand to Play.
+            signingConfig hasUploadKey ? signingConfigs.upload : signingConfigs.debug
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+        }
+    }
+}
+
+/**
+ * An AAB exists to be uploaded to Play, and Play rejects the debug key.
+ *
+ * Failing here costs a second; the same mistake found in the Play Console costs
+ * a rejected upload and a version code that can never be reused. Only the
+ * bundle is guarded: `assembleRelease` still produces the sideloadable APK the
+ * CI artifact has always been.
+ */
+tasks.matching { it.name ==~ /bundle(Release|.*Release)/ }.configureEach {
+    doFirst {
+        if (!hasUploadKey) {
+            throw new GradleException(
+                "No upload key configured, so this bundle would be signed with the " +
+                "committed debug keystore and rejected by Play.\n" +
+                "Set novaguard.uploadStoreFile / novaguard.uploadStorePassword / " +
+                "novaguard.uploadKeyAlias / novaguard.uploadKeyPassword in " +
+                "android/keystore.properties, in ~/.gradle/gradle.properties, as -P " +
+                "properties, or as NOVAGUARD_UPLOADSTOREFILE… environment variables.\n" +
+                "See docs/PLAY_STORE.md.")
         }
     }
 }

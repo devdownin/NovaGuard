@@ -172,11 +172,10 @@ jobs:
           restore-keys: apk-${{ runner.os }}-
 
       # arm64-v8a + x86_64 only (see android/gradle.properties). No signing
-      # secret needed: the release build type is signed with the debug
-      # keystore committed at android/app/debug.keystore, same as the RN
-      # template default — fine for sideloading onto a test device, but a
-      # real release needs its own keystore first (see
-      # https://reactnative.dev/docs/signed-apk-android).
+      # secret needed and none wanted: this artifact is the one someone
+      # sideloads onto a test device, so the committed debug keystore is the
+      # right key for it. What goes to Play is the bundle built by `build-aab`
+      # below, with the upload key, from secrets this job never sees.
       #
       # scripts/build-apk.sh is the same script android-image.yml runs on a
       # pull request, so this path is exercised before it is relied on.
@@ -198,3 +197,95 @@ jobs:
           files: android/app/build/outputs/apk/release/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # The artifact Google Play actually takes.
+  #
+  # Only on a version tag: an AAB is signed with the upload key and burns a
+  # version code the moment it is uploaded, so building one per merge would be
+  # noise at best and a spent version code at worst. The APK above keeps
+  # covering every other trigger.
+  #
+  # Same image, same container plumbing, same `npm ci` — only the Gradle task
+  # differs (see scripts/build-aab.sh). Without the four secrets the build
+  # fails loudly in android/app/build.gradle rather than quietly producing a
+  # debug-signed bundle Play would reject.
+  build-aab:
+    name: Build Play bundle
+    needs: [check]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve the toolchain image
+        id: toolchain
+        env:
+          TAG: ${{ hashFiles('Dockerfile') }}
+          IMAGE: ghcr.io/${{ github.repository }}/android-build
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          REF="${IMAGE}:${TAG}"
+          if docker pull --quiet "$REF"; then
+            echo "Pulled $REF"
+          else
+            echo "No published image for this Dockerfile; building it here."
+            docker build -t "$REF" .
+          fi
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Gradle and npm caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            .ci-cache/gradle
+            .ci-cache/npm
+          key: apk-${{ runner.os }}-${{ hashFiles('package-lock.json', 'android/**/*.gradle', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: apk-${{ runner.os }}-
+
+      # Written outside the checkout and removed on any outcome: a keystore
+      # left in the workspace is a keystore an artifact upload can publish.
+      - name: Restore the upload keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.PLAY_UPLOAD_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64}" ]; then
+            echo "::error::PLAY_UPLOAD_KEYSTORE_BASE64 is not set — see docs/PLAY_STORE.md."
+            exit 1
+          fi
+          install -d -m 700 "${RUNNER_TEMP}/signing"
+          printf '%s' "${KEYSTORE_BASE64}" | base64 -d > "${RUNNER_TEMP}/signing/upload.jks"
+          chmod 600 "${RUNNER_TEMP}/signing/upload.jks"
+
+      # The version code is the run number, not a value in the repository: Play
+      # refuses one it has already seen, and a number that only a human
+      # remembers to bump is a number that gets forgotten exactly once.
+      - name: Build the App Bundle
+        env:
+          BUILD_SCRIPT: scripts/build-aab.sh
+          NOVAGUARD_UPLOADSTOREFILE: /signing/upload.jks
+          NOVAGUARD_UPLOADSTOREPASSWORD: ${{ secrets.PLAY_UPLOAD_STORE_PASSWORD }}
+          NOVAGUARD_UPLOADKEYALIAS: ${{ secrets.PLAY_UPLOAD_KEY_ALIAS }}
+          NOVAGUARD_UPLOADKEYPASSWORD: ${{ secrets.PLAY_UPLOAD_KEY_PASSWORD }}
+          SIGNING_DIR: ${{ runner.temp }}/signing
+        run: scripts/build-apk-in-docker.sh "${{ steps.toolchain.outputs.ref }}" -PnovaguardVersionCode=${{ github.run_number }}
+
+      - name: Shred the keystore
+        if: always()
+        run: rm -rf "${RUNNER_TEMP}/signing"
+
+      # Not attached to the GitHub Release: a signed bundle is an upload
+      # credential's output, and it belongs in the Play Console, not on a public
+      # download page next to the APK.
+      - name: Upload the bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: novaguard-play-bundle
+          path: android/app/build/outputs/bundle/release/*.aab
+          retention-days: 7
+          if-no-files-found: error
