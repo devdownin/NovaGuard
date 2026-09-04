@@ -22,6 +22,8 @@ import {
   BODY_ZOOM_OUT_MS, FACE_HOLD_MS, FACE_ZOOM_IN_MS, RELEASE_MS, useAutoZoom,
 } from '../src/camera/useAutoZoom';
 import { DetectionBox } from '../src/ml/types';
+import { DEFAULT_TRACKER_OPTIONS, iou } from '../src/ml/tracker';
+import { boxInZoomedFrame } from '../src/camera/framing';
 
 const VIEW_W = 360;
 const VIEW_H = 640;
@@ -31,6 +33,10 @@ const FACE_LEFT: DetectionBox = { x: 0.15, y: 0.10, width: 0.16, height: 0.16 };
 /** Right of centre, for the mirrored case. */
 const FACE_RIGHT: DetectionBox = { x: 0.69, y: 0.10, width: 0.16, height: 0.16 };
 const BODY: DetectionBox = { x: 0.30, y: 0.20, width: 0.40, height: 0.70 };
+/** Dead centre, where a centre crop can magnify furthest. */
+const FACE_CENTRED: DetectionBox = { x: 0.42, y: 0.42, width: 0.16, height: 0.16 };
+/** Hard against the left edge: a centre crop cannot magnify this at all. */
+const FACE_AT_EDGE: DetectionBox = { x: 0, y: 0.42, width: 0.16, height: 0.16 };
 
 const T0 = 1_780_000_000_000;
 
@@ -53,12 +59,12 @@ interface Harness {
  * The spy calls through, so the real animation still runs — this only records
  * what each of the three channels was asked to reach, and in how long.
  */
-function mount({ enabled = true } = {}): Harness {
+function mount({ enabled = true, maxCameraZoom = 1 } = {}): Harness {
   const timing = jest.spyOn(Animated, 'timing');
   const box = {} as { zoom: ReturnType<typeof useAutoZoom> };
 
   function Probe({ on }: { on: boolean }) {
-    box.zoom = useAutoZoom({ enabled: on, viewWidth: VIEW_W, viewHeight: VIEW_H });
+    box.zoom = useAutoZoom({ enabled: on, viewWidth: VIEW_W, viewHeight: VIEW_H, maxCameraZoom });
     return null;
   }
   let tree!: ReactTestRenderer.ReactTestRenderer;
@@ -182,6 +188,132 @@ it('pulls back to a wider shot than the close-up, without zooming out past 1x', 
   expect(wide.scale).toBeLessThan(closeUp.scale);
   // But it is still a framing, not a zoom-out — 1x is the floor.
   expect(wide.scale).toBeGreaterThanOrEqual(1);
+});
+
+/**
+ * The magnification the recorded file actually receives.
+ *
+ * A React Native transform scales the preview view; the encoder sits downstream
+ * of the capture session and never sees it. Only `<Camera zoom>` reaches the
+ * file — and it is a centre crop with no pan, which is what makes this delicate
+ * rather than a one-line change.
+ */
+describe('the zoom that reaches the recording', () => {
+  it('leaves the capture alone while the move is still running', () => {
+    const h = mount({ maxCameraZoom: 8 });
+    seeFace(h, FACE_CENTRED);
+
+    // Changing it mid-move would jump the preview: the transform is animating
+    // towards a framing computed against the field of view it started from.
+    expect(h.zoom.cameraZoom).toBe(1);
+  });
+
+  it('hands the magnification to the sensor once the preview has arrived', () => {
+    const h = mount({ maxCameraZoom: 8 });
+    seeFace(h, FACE_CENTRED);
+    wait(FACE_ZOOM_IN_MS);
+
+    // Without this the close-up exists only on screen, which is the whole
+    // complaint this answers.
+    expect(h.zoom.cameraZoom).toBeGreaterThan(1);
+  });
+
+  it('gives back exactly what it took, so the preview does not jump', () => {
+    const h = mount({ maxCameraZoom: 8 });
+    seeFace(h, FACE_CENTRED);
+    const asked = h.moves()[h.moves().length - 1].scale;
+
+    wait(FACE_ZOOM_IN_MS);
+
+    // Read off the value rather than the animation: the hand-over is a `setValue`
+    // in the same commit as the zoom, deliberately not an animation — there is
+    // nothing to animate, since the product must not change at all.
+    const residual = (h.zoom.scale as unknown as { __getValue: () => number }).__getValue();
+    expect(h.zoom.cameraZoom).toBeGreaterThan(1);
+    // The product is what the viewer sees. The transform shrinks by exactly the
+    // factor the sensor gained, so the screen shows nothing happen.
+    expect(residual * h.zoom.cameraZoom).toBeCloseTo(asked, 3);
+  });
+
+  it('refuses to crop a subject out of the recording to zoom in on it', () => {
+    const h = mount({ maxCameraZoom: 8 });
+    // Hard against the left edge. A centre crop at the scale the preview uses
+    // would put this face entirely outside the recorded frame — on a
+    // surveillance camera, losing the only thing worth recording.
+    seeFace(h, FACE_AT_EDGE);
+    wait(FACE_ZOOM_IN_MS);
+
+    expect(h.zoom.cameraZoom).toBe(1);
+    // The preview still frames them, because its transform can pan.
+    expect(h.moves()[0].scale).toBeGreaterThan(1);
+  });
+
+  it('never asks for more than the device can do', () => {
+    const h = mount({ maxCameraZoom: 1.5 });
+    seeFace(h, FACE_CENTRED);
+    wait(FACE_ZOOM_IN_MS);
+
+    expect(h.zoom.cameraZoom).toBeLessThanOrEqual(1.5);
+  });
+
+  it('stays at 1 on a device that cannot zoom, with the preview unaffected', () => {
+    const h = mount();   // maxCameraZoom defaults to 1
+    seeFace(h, FACE_CENTRED);
+    wait(FACE_ZOOM_IN_MS);
+
+    expect(h.zoom.cameraZoom).toBe(1);
+    expect(h.moves()[0].scale).toBeGreaterThan(1);
+  });
+
+  it('gives the sensor back its full field of view when the subject leaves', () => {
+    const h = mount({ maxCameraZoom: 8 });
+    seeFace(h, FACE_CENTRED);
+    wait(FACE_ZOOM_IN_MS);
+    expect(h.zoom.cameraZoom).toBeGreaterThan(1);
+
+    report(h, 400, [], []);
+    wait(FACE_HOLD_MS);
+
+    // Anything else leaves the camera permanently cropped, recording a slice of
+    // the room it was pointed at.
+    expect(h.zoom.cameraZoom).toBe(1);
+  });
+
+  /**
+   * The property the capture bound exists for, read off the hook rather than
+   * recomputed. A sweep that redid the arithmetic itself would go on passing
+   * after the hook stopped calling it — which is exactly what happened to the
+   * first version of this, and how a flat ceiling looked like it worked.
+   */
+  it('never zooms further than the tracker can follow, wherever the face is', () => {
+    const positions = [0, 0.1, 0.19, 0.25, 0.34, 0.42];
+
+    for (const x of positions) {
+      jest.restoreAllMocks();
+      const h = mount({ maxCameraZoom: 8 });
+      const face = { x, y: 0.42, width: 0.14, height: 0.14 };
+      seeFace(h, face);
+      wait(FACE_ZOOM_IN_MS);
+
+      // Same measure the tracker will apply, on the same box it holds: below
+      // its threshold the subject is dropped and re-confirmed from scratch,
+      // leaving no confirmed detection at all for a couple of frames.
+      const overlap = iou(face, boxInZoomedFrame(face, h.zoom.cameraZoom));
+      expect({ x, overlap: overlap >= DEFAULT_TRACKER_OPTIONS.iouThreshold })
+        .toEqual({ x, overlap: true });
+    }
+  });
+
+  it('releases the capture when the setting is switched off mid-move', () => {
+    const h = mount({ maxCameraZoom: 8 }) as Harness & { setEnabled: (on: boolean) => void };
+    seeFace(h, FACE_CENTRED);
+    wait(FACE_ZOOM_IN_MS);
+    expect(h.zoom.cameraZoom).toBeGreaterThan(1);
+
+    h.setEnabled(false);
+
+    expect(h.zoom.cameraZoom).toBe(1);
+  });
 });
 
 it('returns the transform to neutral when the subject is gone', () => {
