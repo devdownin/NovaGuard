@@ -41,6 +41,19 @@ interface CameraFeedProps {
   viewHeight: number;
   /** Boxes for the auto-zoom, already normalized to the viewfinder rect. */
   onFrame?: (faces: DetectionBox[], persons: DetectionBox[]) => void;
+  /**
+   * Magnification asked of the capture session, as a factor over the device's
+   * neutral position. 1 means the sensor delivers its full field of view.
+   *
+   * This is the only zoom that reaches the recorded file: the viewfinder's
+   * transform scales a React Native view, which the encoder never sees.
+   */
+  cameraZoom?: number;
+  /**
+   * How far this device can actually be zoomed, in the same factor. Reported
+   * because the caller decides the zoom and only the device knows its ceiling.
+   */
+  onZoomRange?: (maxFactor: number) => void;
   /** Handed up so the recorder can call `startRecording`/`stopRecording` on it. */
   cameraRef?: RefObject<Camera | null>;
   /** Camera and model failures, which are otherwise completely silent. */
@@ -60,7 +73,8 @@ interface CameraFeedProps {
  * (Viewfinder) falls back to the decorative standby view in that case.
  */
 export function CameraFeed({
-  style, active, viewWidth, viewHeight, onFrame, cameraRef, onProblem, onStage,
+  style, active, viewWidth, viewHeight, onFrame, cameraZoom = 1, onZoomRange, cameraRef,
+  onProblem, onStage,
 }: CameraFeedProps) {
   const { perms, settings, reportDetections } = useAppState();
 
@@ -169,6 +183,10 @@ export function CameraFeed({
     onStage?.(stage);
   }, [onStage]);
 
+  // Reported as headroom over neutral, which is the unit the caller works in.
+  const maxZoomFactor = device ? device.maxZoom / device.neutralZoom : 1;
+  useEffect(() => { onZoomRange?.(maxZoomFactor); }, [maxZoomFactor, onZoomRange]);
+
   const targetFps = FPS_BY_SENSITIVITY[settings.sens];
   const detectPerson = settings.person;
   const detectAnimal = settings.animal;
@@ -262,6 +280,10 @@ export function CameraFeed({
   return (
     <Camera
       ref={cameraRef}
+      // Expressed against the device's neutral position rather than as a raw
+      // factor: on a multi-physical camera `neutralZoom` is the wide-angle
+      // lens, and passing 1 there would start the session on the fish-eye.
+      zoom={Math.min(Math.max(device.neutralZoom * cameraZoom, device.minZoom), device.maxZoom)}
       style={style}
       device={device}
       format={format}

@@ -126,6 +126,23 @@ l'auto-suppression ne récupère jamais jusqu'à une marque qui refuserait encor
 d'enregistrer — supprimer l'historique *et* rester incapable de filmer est le
 pire des deux.
 
+**Un transform React Native ne touche pas l'enregistrement.** Le zoom
+cinématique a longtemps été un `transform` sur la vue qui contient l'aperçu :
+l'encodeur est en aval de la session de capture, pas de l'arbre de vues, donc le
+fichier restait large. Seul `<Camera zoom>` atteint le fichier — et c'est un
+recadrage **centré, sans panoramique**. Appliquer telle quelle l'échelle du
+mouvement recadrerait hors du sujet dès qu'il n'est pas au centre : sur une
+caméra de surveillance, c'est perdre la preuve. D'où `maxZoomKeepingInFrame`,
+qui borne le zoom de capture par la position du sujet lui-même ; le reliquat
+reste au transform, qui sait panoramiquer. Les deux changent dans le même
+commit et leur produit est inchangé, donc l'écran ne bouge pas —
+`boxInZoomedFrame` est ce qui empêche les deux grossissements de se multiplier.
+Et la main n'est passée au capteur **qu'à l'arrivée** du mouvement : `zoom` est
+une propriété de session native, ce projet n'a pas Reanimated, et l'animer
+voudrait dire une mise à jour de prop par image affichée dans une application
+bâtie pour ne pas re-rendre le viseur. L'enregistrement reçoit donc le gros plan
+d'un coup, pas en fondu.
+
 **Une nouvelle référence de tableau est un re-rendu.** `confirmedTracksIfChanged`
 existe pour ça : conserver l'identité quand l'incrustation ne changerait pas.
 

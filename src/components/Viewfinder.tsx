@@ -89,10 +89,14 @@ export function Viewfinder() {
     setSize({ width, height });
   }, []);
 
+  // Reported by the camera once its device is known; until then the hook keeps
+  // the magnification entirely in the preview transform.
+  const [maxCameraZoom, setMaxCameraZoom] = useState(1);
   const autoZoom = useAutoZoom({
     enabled: monitoring && settings.autoZoom,
     viewWidth: size.width,
     viewHeight: size.height,
+    maxCameraZoom,
   });
 
   const standbyLabel = !perms.cam
@@ -149,6 +153,11 @@ export function Viewfinder() {
           viewWidth={size.width}
           viewHeight={size.height}
           onFrame={autoZoom.submitFrame}
+          // What reaches the recorded file. The transform above only moves the
+          // preview; the encoder is downstream of the capture session, not of
+          // the view tree.
+          cameraZoom={autoZoom.cameraZoom}
+          onZoomRange={setMaxCameraZoom}
           cameraRef={cameraRef}
           onProblem={reportCameraProblem}
           onStage={reportFrameStage}

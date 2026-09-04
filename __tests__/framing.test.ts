@@ -3,7 +3,8 @@
  */
 
 import {
-  computeFraming, NEUTRAL_FRAMING, padBox, smoothBox, unionBox,
+  boxInZoomedFrame,
+  computeFraming, maxZoomKeepingInFrame, NEUTRAL_FRAMING, padBox, smoothBox, unionBox,
 } from '../src/camera/framing';
 
 const VIEW_W = 360;
@@ -58,6 +59,89 @@ describe('smoothBox', () => {
     let box = { x: 0, y: 0, width: 0.2, height: 0.2 };
     for (let i = 0; i < 60; i++) box = smoothBox(box, target, 0.25);
     expect(box.x).toBeCloseTo(0.8, 3);
+  });
+});
+
+/**
+ * The capture zoom is the only magnification that reaches the recorded file —
+ * a React Native transform scales the preview view and nothing else. It is also
+ * a centre crop with no pan, which is the whole difficulty.
+ */
+describe('maxZoomKeepingInFrame', () => {
+  it('lets a centred subject zoom as far as it likes', () => {
+    const centred = { x: 0.45, y: 0.45, width: 0.1, height: 0.1 };
+    // Furthest edge is 0.05 from centre, so the crop may shrink to a tenth.
+    expect(maxZoomKeepingInFrame(centred)).toBeCloseTo(10);
+  });
+
+  it('refuses to zoom at all on a subject against the edge', () => {
+    // Cropping here would remove exactly the thing being recorded.
+    expect(maxZoomKeepingInFrame({ x: 0, y: 0.4, width: 0.2, height: 0.2 })).toBe(1);
+    expect(maxZoomKeepingInFrame({ x: 0.4, y: 0.8, width: 0.2, height: 0.2 })).toBe(1);
+  });
+
+  it('is bounded by whichever axis runs out first', () => {
+    // Comfortable horizontally, close to the top edge: the vertical axis decides.
+    const tall = { x: 0.45, y: 0.05, width: 0.1, height: 0.1 };
+    expect(maxZoomKeepingInFrame(tall)).toBeCloseTo(0.5 / 0.45);
+  });
+
+  it('never answers below 1, which would mean zooming out past the sensor', () => {
+    expect(maxZoomKeepingInFrame({ x: 0, y: 0, width: 1, height: 1 })).toBe(1);
+    expect(maxZoomKeepingInFrame({ x: -0.2, y: 0.4, width: 0.3, height: 0.2 })).toBe(1);
+  });
+
+  it('holds: the box stays inside the crop at the zoom it returns', () => {
+    const boxes = [
+      { x: 0.45, y: 0.45, width: 0.1, height: 0.1 },
+      { x: 0.2, y: 0.3, width: 0.15, height: 0.25 },
+      { x: 0.62, y: 0.1, width: 0.2, height: 0.3 },
+    ];
+    for (const box of boxes) {
+      const zoom = Math.min(maxZoomKeepingInFrame(box), 50);
+      const visible = { from: 0.5 - 1 / (2 * zoom), to: 0.5 + 1 / (2 * zoom) };
+      // The property the whole bound exists for, checked rather than assumed.
+      expect(box.x).toBeGreaterThanOrEqual(visible.from - 1e-9);
+      expect(box.y).toBeGreaterThanOrEqual(visible.from - 1e-9);
+      expect(box.x + box.width).toBeLessThanOrEqual(visible.to + 1e-9);
+      expect(box.y + box.height).toBeLessThanOrEqual(visible.to + 1e-9);
+    }
+  });
+});
+
+describe('boxInZoomedFrame', () => {
+  it('leaves the box alone at 1x', () => {
+    const box = { x: 0.3, y: 0.4, width: 0.2, height: 0.1 };
+    expect(boxInZoomedFrame(box, 1)).toEqual(box);
+  });
+
+  it('grows the box by the factor the camera already applied', () => {
+    const centred = { x: 0.4, y: 0.4, width: 0.2, height: 0.2 };
+    const zoomed = boxInZoomedFrame(centred, 2);
+    expect(zoomed.x).toBeCloseTo(0.3);
+    expect(zoomed.y).toBeCloseTo(0.3);
+    expect(zoomed.width).toBeCloseTo(0.4);
+    expect(zoomed.height).toBeCloseTo(0.4);
+  });
+
+  it('pushes an off-centre box further out, as a centre crop does', () => {
+    const left = { x: 0.1, y: 0.45, width: 0.1, height: 0.1 };
+    const zoomed = boxInZoomedFrame(left, 2);
+    // It was 0.35 left of centre; at 2x the crop makes that 0.7.
+    expect(zoomed.x + zoomed.width / 2).toBeCloseTo(0.5 - 0.7);
+  });
+
+  it('composes with computeFraming instead of multiplying with it', () => {
+    const target = { x: 0.4, y: 0.4, width: 0.2, height: 0.2 };
+    const options = { coverage: 0.8, maxScale: 8 };
+    const withoutCameraZoom = computeFraming(target, 400, 400, options);
+
+    // Half the magnification done by the camera; the transform must ask for the
+    // other half, so that camera x transform lands back on the same total.
+    const cameraZoom = 2;
+    const residual = computeFraming(boxInZoomedFrame(target, cameraZoom), 400, 400, options);
+
+    expect(residual.scale * cameraZoom).toBeCloseTo(withoutCameraZoom.scale);
   });
 });
 

@@ -104,6 +104,49 @@ export function smoothBox(previous: DetectionBox | null, next: DetectionBox, alp
   };
 }
 
+/**
+ * Largest capture zoom that still holds `box` entirely in frame.
+ *
+ * `<Camera zoom>` is a centre crop of the sensor: at factor `z` only the middle
+ * `1/z` of each axis survives, and there is no way to offset it. So a subject
+ * that is not centred bounds how far the capture may zoom before it crops that
+ * subject away — which on a surveillance camera is not a cosmetic failure but
+ * the loss of the thing being recorded. A box touching an edge allows no zoom
+ * at all, and the answer is never below 1.
+ *
+ * The preview does not need this: its transform can pan, so it frames the
+ * subject wherever it is. Only the capture is stuck with the centre.
+ */
+export function maxZoomKeepingInFrame(box: DetectionBox): number {
+  if (box.width <= 0 || box.height <= 0) return 1;
+  // Distance from the frame centre to the box's furthest edge, per axis.
+  const halfX = Math.max(0.5 - box.x, box.x + box.width - 0.5);
+  const halfY = Math.max(0.5 - box.y, box.y + box.height - 0.5);
+  const half = Math.max(halfX, halfY);
+  if (half <= 0) return Infinity;
+  return Math.max(1, 0.5 / half);
+}
+
+/**
+ * Where `box` lands once the camera itself has zoomed by `zoom`.
+ *
+ * The capture zoom changes what the frame *is*, so everything downstream — the
+ * viewfinder transform, the overlay — has to be computed against the cropped
+ * frame rather than the sensor's full field of view. Feeding the result to
+ * `computeFraming` is what keeps the two magnifications from multiplying: the
+ * box is larger in the cropped frame, so the residual scale it asks for is
+ * smaller by exactly the factor the camera already applied.
+ */
+export function boxInZoomedFrame(box: DetectionBox, zoom: number): DetectionBox {
+  if (!(zoom > 0)) return box;
+  return {
+    x: (box.x - 0.5) * zoom + 0.5,
+    y: (box.y - 0.5) * zoom + 0.5,
+    width: box.width * zoom,
+    height: box.height * zoom,
+  };
+}
+
 export interface FramingOptions {
   /** Fraction of the view the target should occupy once framed (0–1). */
   coverage: number;
