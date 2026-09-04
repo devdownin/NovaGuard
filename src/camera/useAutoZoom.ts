@@ -8,11 +8,18 @@ import {
 
 export type ZoomPhase = 'idle' | 'close' | 'wide';
 
-/** Slow, deliberate moves — the point is that the camera never snaps. */
-export const CLOSE_ZOOM_IN_MS = 1400;
+/**
+ * Slow, deliberate moves — the point is that the camera never snaps.
+ *
+ * Three seconds each way: at 1400/1600 the push-in and the pull-back still
+ * read as a snap on a surveillance feed, where nothing else in the frame is
+ * moving that fast. The release back to the full frame matches them, so a
+ * subject walking out of shot looks the same as the scripted pull-back.
+ */
+export const CLOSE_ZOOM_IN_MS = 3000;
 export const CLOSE_HOLD_MS = 4000;
-export const WIDE_ZOOM_OUT_MS = 1600;
-export const RELEASE_MS = 1200;
+export const WIDE_ZOOM_OUT_MS = 3000;
+export const RELEASE_MS = 3000;
 /** Re-framing while already holding a subject: softer still, so it reads as drift. */
 const FOLLOW_MS = 700;
 
@@ -32,8 +39,8 @@ export const FULL_CYCLE_MS = CLOSE_ZOOM_IN_MS + CLOSE_HOLD_MS + WIDE_ZOOM_OUT_MS
  * Derived rather than picked: a literal shorter than {@link FULL_CYCLE_MS} lets
  * a new close-up interrupt the pull-back before it has finished, so the wide
  * shot of the whole scene — the entire point of the move — is never reached.
- * That is exactly what a hardcoded 6000 did here: it cut the 1600 ms pull-back
- * at roughly 600 ms and then looped, forever, while anyone stood in frame.
+ * That is exactly what a hardcoded 6000 did here: it cut the pull-back short
+ * and then looped, forever, while anyone stood in frame.
  */
 export const RETRIGGER_COOLDOWN_MS = FULL_CYCLE_MS + WIDE_DWELL_MS;
 

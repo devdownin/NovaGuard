@@ -11,7 +11,7 @@
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 import {
-  CLOSE_HOLD_MS, CLOSE_ZOOM_IN_MS, FULL_CYCLE_MS, RETRIGGER_COOLDOWN_MS,
+  CLOSE_HOLD_MS, CLOSE_ZOOM_IN_MS, FULL_CYCLE_MS, RELEASE_MS, RETRIGGER_COOLDOWN_MS,
   useAutoZoom, WIDE_DWELL_MS, WIDE_ZOOM_OUT_MS, ZoomPhase,
 } from '../src/camera/useAutoZoom';
 import { DetectionBox } from '../src/ml/types';
@@ -61,6 +61,18 @@ describe('timing constants', () => {
     // what shipped — is shorter than the 7000 ms cycle, so the wide shot was
     // cut off partway and never actually appeared.
     expect(RETRIGGER_COOLDOWN_MS).toBeGreaterThanOrEqual(FULL_CYCLE_MS);
+  });
+
+  /**
+   * Literals on purpose: the rest of the suite reads these constants
+   * symbolically, so it stays green at any speed — which is how the move ended
+   * up feeling like a snap. Three seconds each way is the requirement.
+   */
+  it('takes three seconds to push in and three to pull back', () => {
+    expect(CLOSE_ZOOM_IN_MS).toBe(3000);
+    expect(WIDE_ZOOM_OUT_MS).toBe(3000);
+    // Losing the subject widens the same way the scripted pull-back does.
+    expect(RELEASE_MS).toBe(3000);
   });
 
   it('leaves the wide shot up long enough to be read', () => {
