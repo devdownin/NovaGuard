@@ -118,3 +118,65 @@ it('leaves clips alone when auto-delete is off', async () => {
 
   expect(mockFs.unlink).not.toHaveBeenCalled();
 });
+
+/**
+ * Deleting a clip is the one moment a user is looking straight at the free
+ * space figure, and it was the one moment it lied: the sweep that re-measures
+ * was fired next to the unlink rather than after it, so `getFSInfo` answered
+ * with the file still on disk and "Espace" kept counting it until the periodic
+ * sweep corrected it up to 30 s later.
+ */
+describe('free space after a deletion', () => {
+  /** An unlink that only completes when the test says so, freeing 1 GB. */
+  function heldUnlink() {
+    let release!: () => void;
+    mockFs.unlink.mockImplementation(() => new Promise<void>(resolve => {
+      release = () => { reportSpace(21 * GB); resolve(); };
+    }) as never);
+    return () => release();
+  }
+
+  async function seedOneClip(timestamp: number) {
+    await AsyncStorage.setItem('@novaguard:events:v2', JSON.stringify([
+      { id: 1, kind: 'Personne', timestamp, dur: 5, conf: 90, path: '/c/one.mp4', bytes: GB },
+    ]));
+    reportSpace(20 * GB);
+  }
+
+  it('waits for the file to be gone before believing the volume', async () => {
+    await seedOneClip(Date.now());
+    const release = heldUnlink();
+
+    const handle = await mountProvider();
+    expect(handle.state.storage.free).toBe(20 * GB);
+
+    await ReactTestRenderer.act(async () => { handle.state.selectEvent(1); });
+    await ReactTestRenderer.act(async () => { handle.state.doDelete(); });
+    // Still holding the unlink: measuring here is measuring the old volume.
+    expect(handle.state.storage.free).toBe(20 * GB);
+
+    await ReactTestRenderer.act(async () => { release(); });
+    expect(handle.state.storage.free).toBe(21 * GB);
+  });
+
+  it('re-measures after retention drops an expired clip', async () => {
+    // Same stale figure by the other route: nothing in the retention prune
+    // asked the volume again once its files were gone.
+    await AsyncStorage.setItem(
+      '@novaguard:settings',
+      JSON.stringify({ ...defaultSettings, retention: '1 jour' }),
+    );
+    await seedOneClip(Date.now() - 3 * 86_400_000);
+    // Held past the startup sweep, so the only measurement that can see the
+    // freed gigabyte is the one the prune itself owes.
+    const release = heldUnlink();
+
+    const handle = await mountProvider();
+    expect(mockFs.unlink).toHaveBeenCalledWith('/c/one.mp4');
+    expect(handle.state.storage.free).toBe(20 * GB);
+
+    await ReactTestRenderer.act(async () => { release(); });
+    expect(handle.state.events).toHaveLength(0);
+    expect(handle.state.storage.free).toBe(21 * GB);
+  });
+});
