@@ -137,6 +137,22 @@ qui borne le zoom de capture par la position du sujet lui-même ; le reliquat
 reste au transform, qui sait panoramiquer. Les deux changent dans le même
 commit et leur produit est inchangé, donc l'écran ne bouge pas —
 `boxInZoomedFrame` est ce qui empêche les deux grossissements de se multiplier.
+**Un zoom de capture n'est pas un mouvement, mais le tracker ne sait pas
+faire la différence.** Toutes ses boîtes sont exprimées dans un cadre qui vient
+d'être recadré, donc le même sujet arrive ailleurs à l'image suivante ;
+au-delà d'un certain pas, `updateTracks` cesse de le reconnaître, abandonne la
+piste, et la remplaçante demande `confirmAfter` images avant d'être confirmée —
+sans sujet confirmé pendant ce temps, et le post-roll qui s'arme. **Un plafond
+fixe ne corrige pas ça** : une boîte centrée ne fait que grandir et garde
+`1/z²` d'elle-même (2× est sa limite), mais une boîte décentrée est *translatée*
+bien plus qu'elle ne grandit et peut ne plus recouvrir sa position d'avant dès
+1,5×. La borne doit donc être celle du sujet lui-même — `maxZoomTrackable`,
+mesurée avec l'`iou` **du tracker**, sur la boîte **brute** qu'il compare et non
+sur la boîte paddée du cadrage. `captureZoomFor` réunit les trois bornes en un
+seul endroit exprès : trois bornes qui interagissent, et un balayage qui
+recalculerait la décision au lieu de l'appeler continuerait de passer après
+qu'elle a changé — ce qui est arrivé à la première version de ce test.
+
 Et la main n'est passée au capteur **qu'à l'arrivée** du mouvement : `zoom` est
 une propriété de session native, ce projet n'a pas Reanimated, et l'animer
 voudrait dire une mise à jour de prop par image affichée dans une application

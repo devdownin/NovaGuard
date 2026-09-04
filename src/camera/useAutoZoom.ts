@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing } from 'react-native';
 import { DetectionBox } from '../ml/types';
 import {
-  boxInZoomedFrame, computeFraming, Framing, FramingOptions, maxZoomKeepingInFrame,
+  boxInZoomedFrame, captureZoomFor, computeFraming, Framing, FramingOptions,
   NEUTRAL_FRAMING, padBox, smoothBox, unionBox,
 } from './framing';
 
@@ -51,6 +51,7 @@ const BODY_PADDING = 0.12;
 const SCALE_EPSILON = 0.08;
 /** Below this, handing magnification to the sensor buys nothing and costs a session change. */
 const ZOOM_EPSILON = 0.05;
+
 const PAN_EPSILON = 0.06;
 
 const FACE_FRAMING: FramingOptions = { coverage: FACE_COVERAGE, maxScale: FACE_MAX_SCALE };
@@ -173,15 +174,20 @@ export function useAutoZoom({
    * viewer sees nothing happen. `box` is in the current, already-cropped frame,
    * so everything here is relative to the zoom in force.
    */
-  const handToCamera = useCallback((box: DetectionBox, options: FramingOptions) => {
-    const wanted = computeFraming(box, viewWidth, viewHeight, options).scale;
+  const handToCamera = useCallback((
+    framed: DetectionBox, tracked: DetectionBox, options: FramingOptions,
+  ) => {
+    const wanted = computeFraming(framed, viewWidth, viewHeight, options).scale;
     const headroom = maxCameraZoom / cameraZoomRef.current;
-    const extra = Math.min(wanted, maxZoomKeepingInFrame(box), headroom);
+    // `tracked` is the raw detection the tracker compares; `framed` the padded
+    // box the framing uses. The two bounds are not interchangeable — see
+    // `captureZoomFor`, which is where the decision lives so it can be swept.
+    const extra = captureZoomFor(framed, tracked, wanted, headroom);
     if (!(extra > 1 + ZOOM_EPSILON)) return;
 
     cameraZoomRef.current *= extra;
     setCameraZoom(cameraZoomRef.current);
-    snapTo(computeFraming(boxInZoomedFrame(box, extra), viewWidth, viewHeight, options));
+    snapTo(computeFraming(boxInZoomedFrame(framed, extra), viewWidth, viewHeight, options));
   }, [maxCameraZoom, snapTo, viewWidth, viewHeight]);
 
   /**
@@ -238,11 +244,12 @@ export function useAutoZoom({
     // from the full field of view and the wide shot is genuinely wide — in the
     // file as much as on screen.
     releaseCamera(smoothedFace.current ?? body, FACE_FRAMING);
-    const framed = padBox(smoothedBody.current ?? body, BODY_PADDING);
+    const tracked = smoothedBody.current ?? body;
+    const framed = padBox(tracked, BODY_PADDING);
     animateTo(
       computeFraming(framed, viewWidth, viewHeight, BODY_FRAMING),
       BODY_ZOOM_OUT_MS,
-      () => handToCamera(framed, BODY_FRAMING),
+      () => handToCamera(framed, tracked, BODY_FRAMING),
     );
   }, [animateTo, handToCamera, release, releaseCamera, setPhaseBoth, viewWidth, viewHeight]);
 
@@ -282,12 +289,13 @@ export function useAutoZoom({
       lastFaceZoomAt.current = Date.now();
       setPhaseBoth('face');
       const framed = padBox(smoothedFace.current!, FACE_PADDING);
+      const tracked = smoothedFace.current!;
       animateTo(
         computeFraming(framed, viewWidth, viewHeight, FACE_FRAMING),
         FACE_ZOOM_IN_MS,
         // Only once the preview has arrived: the sensor then holds the close-up
         // for the whole hold, which is what puts it in the recording.
-        () => handToCamera(framed, FACE_FRAMING),
+        () => handToCamera(framed, tracked, FACE_FRAMING),
       );
       holdTimer.current = setTimeout(goToBody, FACE_HOLD_MS + FACE_ZOOM_IN_MS);
       return;

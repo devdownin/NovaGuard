@@ -4,8 +4,11 @@
 
 import {
   boxInZoomedFrame,
-  computeFraming, maxZoomKeepingInFrame, NEUTRAL_FRAMING, padBox, smoothBox, unionBox,
+  captureZoomFor, computeFraming, maxZoomKeepingInFrame, maxZoomTrackable, NEUTRAL_FRAMING,
+  padBox, smoothBox, TRACK_OVERLAP_FLOOR, unionBox,
 } from '../src/camera/framing';
+import { DEFAULT_TRACKER_OPTIONS, iou } from '../src/ml/tracker';
+import { DetectionBox } from '../src/ml/types';
 
 const VIEW_W = 360;
 const VIEW_H = 560;
@@ -106,6 +109,79 @@ describe('maxZoomKeepingInFrame', () => {
       expect(box.x + box.width).toBeLessThanOrEqual(visible.to + 1e-9);
       expect(box.y + box.height).toBeLessThanOrEqual(visible.to + 1e-9);
     }
+  });
+});
+
+/**
+ * A capture zoom is not a movement — nobody went anywhere — but the tracker
+ * cannot tell: every box it holds is expressed in a frame that has just been
+ * recropped, so the same subject arrives somewhere else on the next frame. Past
+ * a certain step `updateTracks` stops recognising it, drops the track, and the
+ * replacement needs `confirmAfter` frames before anything is confirmed again.
+ */
+describe('maxZoomTrackable', () => {
+  const FLOOR = TRACK_OVERLAP_FLOOR;
+  const overlapAfter = (box: DetectionBox, zoom: number) => iou(box, boxInZoomedFrame(box, zoom));
+
+  it('sits above the threshold the tracker actually applies', () => {
+    // The floor is deliberately clear of it: a subject is usually moving too,
+    // and that motion spends overlap of its own. If someone raises the
+    // tracker's threshold past the floor, this is what says so.
+    expect(FLOOR).toBeGreaterThan(DEFAULT_TRACKER_OPTIONS.iouThreshold);
+  });
+
+  it('lands on the zoom where the overlap runs out', () => {
+    const box = { x: 0.4, y: 0.4, width: 0.2, height: 0.2 };
+    const limit = maxZoomTrackable(box, FLOOR);
+
+    expect(overlapAfter(box, limit)).toBeGreaterThanOrEqual(FLOOR - 1e-6);
+    // And it is the *largest* such zoom, not a timid one.
+    expect(overlapAfter(box, limit + 0.05)).toBeLessThan(FLOOR);
+  });
+
+  it('allows a centred subject more than an off-centre one', () => {
+    // A centred box only grows; an off-centre one is translated as well, which
+    // costs overlap far faster. That asymmetry is why a flat ceiling cannot work.
+    const centred = maxZoomTrackable({ x: 0.43, y: 0.43, width: 0.14, height: 0.14 }, FLOOR);
+    const offCentre = maxZoomTrackable({ x: 0.15, y: 0.43, width: 0.14, height: 0.14 }, FLOOR);
+
+    expect(centred).toBeGreaterThan(offCentre);
+  });
+
+  it('never asks for less than no zoom at all', () => {
+    expect(maxZoomTrackable({ x: 0, y: 0, width: 0, height: 0 }, FLOOR)).toBe(1);
+    expect(maxZoomTrackable({ x: 0.02, y: 0.02, width: 0.04, height: 0.04 }, FLOOR))
+      .toBeGreaterThanOrEqual(1);
+  });
+
+  /**
+   * The property the whole bound exists for, checked across the space rather
+   * than at the one point that first suggested a flat ceiling would do. It
+   * would not: a centred box keeps `1/z²` of itself and survives to 2x, while a
+   * face at (0.19, 0.19) stops overlapping its old position at barely 1.5x.
+   */
+  it('keeps every subject matchable, wherever it is in frame', () => {
+    const sizes = [0.10, 0.14, 0.18, 0.24];
+    let worst = 1;
+
+    for (const size of sizes) {
+      for (let x = 0; x <= 1 - size; x += 0.02) {
+        for (let y = 0; y <= 1 - size; y += 0.02) {
+          const box = { x, y, width: size, height: size };
+          const framed = padBox(box, 0.25);
+          const zoom = captureZoomFor(
+            framed,
+            box,
+            computeFraming(framed, 360, 640, { coverage: 0.45, maxScale: 2.8 }).scale,
+            Infinity,
+          );
+          if (zoom <= 1) continue;
+          worst = Math.min(worst, overlapAfter(box, zoom));
+        }
+      }
+    }
+
+    expect(worst).toBeGreaterThanOrEqual(DEFAULT_TRACKER_OPTIONS.iouThreshold);
   });
 });
 

@@ -22,6 +22,8 @@ import {
   BODY_ZOOM_OUT_MS, FACE_HOLD_MS, FACE_ZOOM_IN_MS, RELEASE_MS, useAutoZoom,
 } from '../src/camera/useAutoZoom';
 import { DetectionBox } from '../src/ml/types';
+import { DEFAULT_TRACKER_OPTIONS, iou } from '../src/ml/tracker';
+import { boxInZoomedFrame } from '../src/camera/framing';
 
 const VIEW_W = 360;
 const VIEW_H = 640;
@@ -275,6 +277,31 @@ describe('the zoom that reaches the recording', () => {
     // Anything else leaves the camera permanently cropped, recording a slice of
     // the room it was pointed at.
     expect(h.zoom.cameraZoom).toBe(1);
+  });
+
+  /**
+   * The property the capture bound exists for, read off the hook rather than
+   * recomputed. A sweep that redid the arithmetic itself would go on passing
+   * after the hook stopped calling it — which is exactly what happened to the
+   * first version of this, and how a flat ceiling looked like it worked.
+   */
+  it('never zooms further than the tracker can follow, wherever the face is', () => {
+    const positions = [0, 0.1, 0.19, 0.25, 0.34, 0.42];
+
+    for (const x of positions) {
+      jest.restoreAllMocks();
+      const h = mount({ maxCameraZoom: 8 });
+      const face = { x, y: 0.42, width: 0.14, height: 0.14 };
+      seeFace(h, face);
+      wait(FACE_ZOOM_IN_MS);
+
+      // Same measure the tracker will apply, on the same box it holds: below
+      // its threshold the subject is dropped and re-confirmed from scratch,
+      // leaving no confirmed detection at all for a couple of frames.
+      const overlap = iou(face, boxInZoomedFrame(face, h.zoom.cameraZoom));
+      expect({ x, overlap: overlap >= DEFAULT_TRACKER_OPTIONS.iouThreshold })
+        .toEqual({ x, overlap: true });
+    }
   });
 
   it('releases the capture when the setting is switched off mid-move', () => {

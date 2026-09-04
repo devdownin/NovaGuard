@@ -1,4 +1,5 @@
 import { DetectionBox } from '../ml/types';
+import { iou } from '../ml/tracker';
 
 /**
  * Geometry for the cinematic auto-zoom.
@@ -145,6 +146,80 @@ export function boxInZoomedFrame(box: DetectionBox, zoom: number): DetectionBox 
     width: box.width * zoom,
     height: box.height * zoom,
   };
+}
+
+/**
+ * Largest capture zoom whose change of coordinates the tracker can still follow.
+ *
+ * A capture zoom is not a movement — the subject has not gone anywhere — but
+ * the tracker cannot tell the difference: every box it holds is expressed in a
+ * frame that has just been recropped, so on the next frame the same subject
+ * arrives somewhere else. `updateTracks` matches on overlap, so past a certain
+ * step it stops recognising the subject, drops the track and starts a new one
+ * that needs `confirmAfter` frames to be trusted again — during which there is
+ * no confirmed subject at all and the post-roll arms.
+ *
+ * A flat ceiling does not fix this. A centred box only grows, so its overlap is
+ * `1/z²` and 2x is the limit — but an off-centre one is *translated* far more
+ * than it grows, and at barely 1.5x can end up not overlapping its old position
+ * at all. The bound has to be the subject's own, which is what this computes.
+ *
+ * Measured with the tracker's own `iou`, deliberately: a bound calculated with
+ * a different notion of overlap than the one that will judge it is no bound.
+ * Overlap falls monotonically as the crop tightens, so a bisection finds the
+ * edge; it runs when a move ends, never per frame.
+ */
+export function maxZoomTrackable(box: DetectionBox, minOverlap: number, ceiling = 4): number {
+  if (box.width <= 0 || box.height <= 0) return 1;
+  const overlapAt = (zoom: number) => iou(box, boxInZoomedFrame(box, zoom));
+  if (overlapAt(ceiling) >= minOverlap) return ceiling;
+
+  let keeps = 1;
+  let loses = ceiling;
+  for (let i = 0; i < 40; i++) {
+    const mid = (keeps + loses) / 2;
+    if (overlapAt(mid) >= minOverlap) keeps = mid;
+    else loses = mid;
+  }
+  return keeps;
+}
+
+/**
+ * Overlap a subject must still have with itself across a capture zoom.
+ *
+ * Above the tracker's own threshold on purpose: the subject is usually moving
+ * as well, and that motion spends overlap too. At the tracker's exact figure a
+ * zoom that is *just* followable stops being followable the moment anybody
+ * takes a step.
+ */
+export const TRACK_OVERLAP_FLOOR = 0.32;
+
+/**
+ * How far the capture may zoom, given everything that limits it at once.
+ *
+ * Kept here rather than inline in the hook so the decision can be exercised
+ * directly: it is three bounds that interact, and a sweep that recomputed them
+ * instead of calling this would go on passing after the real one changed.
+ *
+ * - `framed` is the padded box the *framing* uses, and bounds the crop that
+ *   would push the subject out of shot.
+ * - `tracked` is the raw detection the *tracker* compares, and bounds the jump
+ *   in coordinates it can still follow. Bounding the padded box here would
+ *   bound the wrong thing.
+ */
+export function captureZoomFor(
+  framed: DetectionBox,
+  tracked: DetectionBox,
+  wantedScale: number,
+  headroom: number,
+  minOverlap: number = TRACK_OVERLAP_FLOOR,
+): number {
+  return Math.min(
+    wantedScale,
+    maxZoomKeepingInFrame(framed),
+    maxZoomTrackable(tracked, minOverlap),
+    headroom,
+  );
 }
 
 export interface FramingOptions {
