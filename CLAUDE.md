@@ -126,6 +126,21 @@ l'auto-suppression ne récupère jamais jusqu'à une marque qui refuserait encor
 d'enregistrer — supprimer l'historique *et* rester incapable de filmer est le
 pire des deux.
 
+**Le zoom cadre une personne entière, jamais un visage seul.** Il a été
+construit sur la boîte du visage, et c'est ce qui le rendait inutile : à 2,8×
+sur une tête, les mains, ce qu'elles portent et la direction prise sortent du
+cadre — et du fichier — alors que c'est exactement ce qu'une caméra de
+surveillance est là pour garder. Le sujet est donc `subjectBox`, qui rend
+toujours une boîte **de personne**. La détection de visages n'a pas disparu
+mais ne cadre plus rien : elle choisit *qui* regarder quand plusieurs personnes
+sont dans le champ, et son union avec la personne rattrape une boîte qui aurait
+coupé la tête. Deux conséquences qui ne doivent pas être reperdues : un sujet
+sans visage détecté — de dos, masqué, dans le noir — déclenche le mouvement
+comme les autres, et un visage sans personne n'en déclenche aucun. Cadrer un
+corps borne aussi le grossissement tout seul, `computeFraming` s'arrêtant à la
+couverture demandée : quelqu'un qui remplit l'image est à peine rapproché,
+quelqu'un au fond d'une pièce est amené devant.
+
 **Un transform React Native ne touche pas l'enregistrement.** Le zoom
 cinématique a longtemps été un `transform` sur la vue qui contient l'aperçu :
 l'encodeur est en aval de la session de capture, pas de l'arbre de vues, donc le
@@ -158,6 +173,22 @@ une propriété de session native, ce projet n'a pas Reanimated, et l'animer
 voudrait dire une mise à jour de prop par image affichée dans une application
 bâtie pour ne pas re-rendre le viseur. L'enregistrement reçoit donc le gros plan
 d'un coup, pas en fondu.
+
+**La surveillance tourne écran éteint ; le reste ne doit pas.** C'est tout
+l'objet du service de premier plan : caméra, analyse, suivi et enregistrement
+continuent en arrière-plan. Ce qui continuait avec eux, c'était le travail dont
+le seul produit est à l'écran — le flux d'aperçu, et l'état du viseur que le
+chemin d'image poussait jusqu'à cinq fois par seconde pour déplacer une boîte
+sur un écran éteint. `useForeground` sépare les deux, et `preview={foreground}`
+est la seule prop touchée : **`isActive` reste vrai**, sinon on arrêterait la
+surveillance au lieu d'économiser. La bascule ne suit que le passage en
+arrière-plan, jamais le début ou la fin d'un enregistrement — ajouter ou retirer
+une sortie d'aperçu en plein clip reconfigure la session de capture, et ce
+dépôt a déjà payé une reconfiguration de ce genre entre deux clips. Enfin
+`AppState.currentState` vaut `undefined` avant le premier évènement et peut
+valoir `unknown` sur appareil : seul un `background` explicite compte comme
+caché, parce que se tromper dans l'autre sens éteint l'aperçu d'une application
+qu'on est en train de regarder.
 
 **Une nouvelle référence de tableau est un re-rendu.** `confirmedTracksIfChanged`
 existe pour ça : conserver l'identité quand l'incrustation ne changerait pas.

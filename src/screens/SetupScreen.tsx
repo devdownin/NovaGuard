@@ -69,7 +69,7 @@ export function SetupScreen() {
           <SettingRow label="Détecter les animaux">
             <Switch value={settings.animal} onValueChange={s.toggleAnimal} />
           </SettingRow>
-          <SettingRow label="Zoom auto sur les visages" subtitle="Gros plan 4 s, puis retour sur la personne">
+          <SettingRow label="Zoom auto sur les personnes" subtitle="Plan serré 4 s, puis plan large sur la scène">
             <Switch value={settings.autoZoom} onValueChange={s.toggleAutoZoom} />
           </SettingRow>
           <SettingRow

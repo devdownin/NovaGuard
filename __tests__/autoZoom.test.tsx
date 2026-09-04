@@ -2,7 +2,8 @@
  * The cinematic move's timing, driven through the real state machine.
  *
  * The framing maths has its own tests (`framing.test.ts`); what this covers is
- * the part that was wrong — how long each phase is allowed to last.
+ * the part that was wrong — how long each phase is allowed to last, and what
+ * the move is allowed to be *about*: a person, never a face on its own.
  *
  * @format
  */
@@ -10,8 +11,8 @@
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 import {
-  BODY_DWELL_MS, BODY_ZOOM_OUT_MS, FACE_HOLD_MS, FACE_ZOOM_IN_MS, FULL_CYCLE_MS,
-  RETRIGGER_COOLDOWN_MS, useAutoZoom, ZoomPhase,
+  CLOSE_HOLD_MS, CLOSE_ZOOM_IN_MS, FULL_CYCLE_MS, RETRIGGER_COOLDOWN_MS,
+  useAutoZoom, WIDE_DWELL_MS, WIDE_ZOOM_OUT_MS, ZoomPhase,
 } from '../src/camera/useAutoZoom';
 import { DetectionBox } from '../src/ml/types';
 
@@ -55,7 +56,7 @@ beforeEach(() => {
 afterEach(() => { jest.useRealTimers(); });
 
 describe('timing constants', () => {
-  it('never lets a new close-up interrupt the pull-back', () => {
+  it('never lets a new close shot interrupt the pull-back', () => {
     // The invariant the whole feature rests on. A literal 6000 here — which is
     // what shipped — is shorter than the 7000 ms cycle, so the wide shot was
     // cut off partway and never actually appeared.
@@ -63,34 +64,34 @@ describe('timing constants', () => {
   });
 
   it('leaves the wide shot up long enough to be read', () => {
-    expect(RETRIGGER_COOLDOWN_MS - FULL_CYCLE_MS).toBe(BODY_DWELL_MS);
-    expect(BODY_DWELL_MS).toBeGreaterThan(BODY_ZOOM_OUT_MS / 2);
+    expect(RETRIGGER_COOLDOWN_MS - FULL_CYCLE_MS).toBe(WIDE_DWELL_MS);
+    expect(WIDE_DWELL_MS).toBeGreaterThan(WIDE_ZOOM_OUT_MS / 2);
   });
 });
 
 describe('the move, with someone standing in frame', () => {
-  it('eases into the face, holds, then pulls back to the whole person', () => {
+  it('eases in on the person, holds, then pulls back to the whole scene', () => {
     const h = mount();
 
     report(h, 0);
     expect(h.phase).toBe('idle');   // one sighting is not a streak
     report(h, 200);
-    expect(h.phase).toBe('face');
+    expect(h.phase).toBe('close');
 
-    wait(FACE_ZOOM_IN_MS + FACE_HOLD_MS);
-    expect(h.phase).toBe('body');
+    wait(CLOSE_ZOOM_IN_MS + CLOSE_HOLD_MS);
+    expect(h.phase).toBe('wide');
   });
 
   it('holds the wide shot past the end of the pull-back', () => {
     const h = mount();
     report(h, 0);
     report(h, 200);
-    wait(FACE_ZOOM_IN_MS + FACE_HOLD_MS);
+    wait(CLOSE_ZOOM_IN_MS + CLOSE_HOLD_MS);
 
-    // The subject stays, so faces keep arriving all the way through.
-    for (let t = 5600; t <= FULL_CYCLE_MS + BODY_DWELL_MS - 200; t += 200) {
+    // The subject stays, so reports keep arriving all the way through.
+    for (let t = 5600; t <= FULL_CYCLE_MS + WIDE_DWELL_MS - 200; t += 200) {
       report(h, t);
-      expect(h.phase).toBe('body');
+      expect(h.phase).toBe('wide');
     }
   });
 
@@ -98,10 +99,37 @@ describe('the move, with someone standing in frame', () => {
     const h = mount();
     report(h, 0);
     report(h, 200);
-    wait(FACE_ZOOM_IN_MS + FACE_HOLD_MS);
+    wait(CLOSE_ZOOM_IN_MS + CLOSE_HOLD_MS);
 
     report(h, RETRIGGER_COOLDOWN_MS + 400);
-    expect(h.phase).toBe('face');
+    expect(h.phase).toBe('close');
+  });
+});
+
+/**
+ * What the move is about. The trigger used to be a face, which meant a subject
+ * with their back to the camera — or in the dark, where this app is expected to
+ * work — was never zoomed on at all, while a stray face where the person
+ * detector saw nobody pulled the camera into a portrait.
+ */
+describe('what starts a move', () => {
+  it('zooms on someone whose face is never detected', () => {
+    const h = mount();
+
+    report(h, 0, [], [BODY]);
+    report(h, 200, [], [BODY]);
+
+    expect(h.phase).toBe('close');
+  });
+
+  it('does nothing for a face with nobody attached to it', () => {
+    const h = mount();
+
+    report(h, 0, [FACE], []);
+    report(h, 200, [FACE], []);
+    report(h, 400, [FACE], []);
+
+    expect(h.phase).toBe('idle');
   });
 });
 
@@ -110,10 +138,22 @@ describe('when the subject leaves', () => {
     const h = mount();
     report(h, 0);
     report(h, 200);
-    expect(h.phase).toBe('face');
+    expect(h.phase).toBe('close');
 
     report(h, 400, [], []);
     wait(5000);                      // past the lost-grace window
+    expect(h.phase).toBe('idle');
+  });
+
+  it('lets go even while their face is still being detected', () => {
+    const h = mount();
+    report(h, 0);
+    report(h, 200);
+
+    // Person gone, face still coming back: there is no longer anything whole
+    // to frame, so the camera must not sit on the leftover portrait.
+    report(h, 400, [FACE], []);
+    wait(5000);
     expect(h.phase).toBe('idle');
   });
 });

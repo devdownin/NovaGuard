@@ -43,6 +43,64 @@ export function unionBox(boxes: DetectionBox[]): DetectionBox | null {
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
+/** Area of a box, in whatever space it is expressed. */
+function areaOf(box: DetectionBox): number {
+  return Math.max(0, box.width) * Math.max(0, box.height);
+}
+
+/** How much of `inner` falls inside `outer`, as a fraction of `inner` (0–1). */
+export function containedFraction(inner: DetectionBox, outer: DetectionBox): number {
+  const area = areaOf(inner);
+  if (area <= 0) return 0;
+  const x = Math.max(inner.x, outer.x);
+  const y = Math.max(inner.y, outer.y);
+  const right = Math.min(inner.x + inner.width, outer.x + outer.width);
+  const bottom = Math.min(inner.y + inner.height, outer.y + outer.height);
+  if (right <= x || bottom <= y) return 0;
+  return ((right - x) * (bottom - y)) / area;
+}
+
+/** Most of a face has to sit inside a body box before we call it that body's face. */
+const FACE_BELONGS = 0.5;
+
+/**
+ * The one person the close-up should be built around, framed head to toe.
+ *
+ * The move used to be built on the face box, which is what "zoom auto sur les
+ * visages" meant literally and what made it useless as evidence: a head filling
+ * the screen while the hands, what they carry and where they are going all sit
+ * outside the recorded crop. The subject of the move is a *person*, so the box
+ * returned here is a person box — never a face.
+ *
+ * Faces still earn their keep, in two ways that do not put one on screen alone:
+ * they pick which person the camera looks at when several are in shot (the one
+ * facing the camera is the one whose face was found), and they are unioned into
+ * the chosen person, so a detection that clipped the head still frames a whole
+ * person. Without any face the largest person — the nearest one — is the
+ * subject, because a subject seen from behind must still be zoomed on.
+ */
+export function subjectBox(persons: DetectionBox[], faces: DetectionBox[]): DetectionBox | null {
+  if (persons.length === 0) return null;
+
+  let best: DetectionBox | null = null;
+  let bestArea = -1;
+  let bestHasFace = false;
+
+  for (const person of persons) {
+    const own = faces.filter(face => containedFraction(face, person) >= FACE_BELONGS);
+    const hasFace = own.length > 0;
+    const area = areaOf(person);
+    // A face outranks size; between two faces, the nearer subject wins.
+    if (best && bestHasFace && !hasFace) continue;
+    if (best && hasFace === bestHasFace && area <= bestArea) continue;
+    best = hasFace ? unionBox([person, ...own])! : person;
+    bestArea = area;
+    bestHasFace = hasFace;
+  }
+
+  return best;
+}
+
 /**
  * Converts a box normalized to the (uprighted) camera frame into a box
  * normalized to the viewfinder rect.

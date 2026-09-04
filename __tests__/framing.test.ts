@@ -4,8 +4,8 @@
 
 import {
   boxInZoomedFrame,
-  captureZoomFor, computeFraming, maxZoomKeepingInFrame, maxZoomTrackable, NEUTRAL_FRAMING,
-  padBox, smoothBox, TRACK_OVERLAP_FLOOR, unionBox,
+  captureZoomFor, computeFraming, containedFraction, maxZoomKeepingInFrame, maxZoomTrackable,
+  NEUTRAL_FRAMING, padBox, smoothBox, subjectBox, TRACK_OVERLAP_FLOOR, unionBox,
 } from '../src/camera/framing';
 import { DEFAULT_TRACKER_OPTIONS, iou } from '../src/ml/tracker';
 import { DetectionBox } from '../src/ml/types';
@@ -281,5 +281,75 @@ describe('computeFraming', () => {
     expect(scale).toBe(1);
     expect(translateX).toBeCloseTo(0);
     expect(translateY).toBeCloseTo(0);
+  });
+});
+
+describe('containedFraction', () => {
+  const outer: DetectionBox = { x: 0.2, y: 0.2, width: 0.4, height: 0.4 };
+
+  it('is 1 for a box entirely inside', () => {
+    expect(containedFraction({ x: 0.3, y: 0.3, width: 0.1, height: 0.1 }, outer)).toBeCloseTo(1);
+  });
+
+  it('is 0 for a box that does not touch', () => {
+    expect(containedFraction({ x: 0.7, y: 0.7, width: 0.1, height: 0.1 }, outer)).toBe(0);
+  });
+
+  it('measures the overlap against the inner box, not the outer one', () => {
+    // Half of this sits left of `outer`. Measured against the outer box the
+    // answer would be a small fraction instead of a half.
+    expect(containedFraction({ x: 0.1, y: 0.3, width: 0.2, height: 0.1 }, outer)).toBeCloseTo(0.5);
+  });
+
+  it('is 0 for a box with no area', () => {
+    expect(containedFraction({ x: 0.3, y: 0.3, width: 0, height: 0.1 }, outer)).toBe(0);
+  });
+});
+
+/**
+ * The subject of the cinematic move. Every answer here is a person box (or a
+ * person unioned with their own face) — never a face on its own, which is the
+ * whole reason this function exists.
+ */
+describe('subjectBox', () => {
+  const near: DetectionBox = { x: 0.6, y: 0.2, width: 0.3, height: 0.7 };
+  const far: DetectionBox = { x: 0.1, y: 0.35, width: 0.12, height: 0.3 };
+  const farFace: DetectionBox = { x: 0.13, y: 0.36, width: 0.06, height: 0.06 };
+
+  it('has nothing to frame without a person, whatever the faces say', () => {
+    expect(subjectBox([], [farFace])).toBeNull();
+  });
+
+  it('takes the nearest person when no face is found', () => {
+    expect(subjectBox([far, near], [])).toEqual(near);
+  });
+
+  it('prefers the person a face was found on, near or far', () => {
+    expect(subjectBox([near, far], [farFace])).toMatchObject({ x: far.x, width: far.width });
+  });
+
+  it('ignores a face that belongs to nobody in the list', () => {
+    const stray: DetectionBox = { x: 0.02, y: 0.02, width: 0.05, height: 0.05 };
+    expect(subjectBox([far, near], [stray])).toEqual(near);
+  });
+
+  it('takes in a head the person box clipped', () => {
+    const headless: DetectionBox = { x: 0.4, y: 0.3, width: 0.2, height: 0.6 };
+    // Mostly inside them, but rising above the box — a detection that cut the
+    // head off. Framing the person alone would frame them without it.
+    const face: DetectionBox = { x: 0.45, y: 0.25, width: 0.1, height: 0.1 };
+    const subject = subjectBox([headless], [face])!;
+    expect(subject.y).toBeCloseTo(0.25);
+    expect(subject.y + subject.height).toBeCloseTo(0.9);
+  });
+
+  it('keeps the whole body when the face sits inside it', () => {
+    const face: DetectionBox = { x: 0.7, y: 0.25, width: 0.08, height: 0.08 };
+    const subject = subjectBox([near], [face])!;
+    // Same box, to floating-point noise: a union with something already inside
+    // adds nothing.
+    for (const key of ['x', 'y', 'width', 'height'] as const) {
+      expect(subject[key]).toBeCloseTo(near[key], 9);
+    }
   });
 });

@@ -3,49 +3,66 @@ import { Animated, Easing } from 'react-native';
 import { DetectionBox } from '../ml/types';
 import {
   boxInZoomedFrame, captureZoomFor, computeFraming, Framing, FramingOptions,
-  NEUTRAL_FRAMING, padBox, smoothBox, unionBox,
+  NEUTRAL_FRAMING, padBox, smoothBox, subjectBox, unionBox,
 } from './framing';
 
-export type ZoomPhase = 'idle' | 'face' | 'body';
+export type ZoomPhase = 'idle' | 'close' | 'wide';
 
 /** Slow, deliberate moves — the point is that the camera never snaps. */
-export const FACE_ZOOM_IN_MS = 1400;
-export const FACE_HOLD_MS = 4000;
-export const BODY_ZOOM_OUT_MS = 1600;
+export const CLOSE_ZOOM_IN_MS = 1400;
+export const CLOSE_HOLD_MS = 4000;
+export const WIDE_ZOOM_OUT_MS = 1600;
 export const RELEASE_MS = 1200;
 /** Re-framing while already holding a subject: softer still, so it reads as drift. */
 const FOLLOW_MS = 700;
 
-/** Consecutive reports a face must appear in before a move is triggered. */
-const FACE_TRIGGER_STREAK = 2;
+/** Consecutive reports a person must appear in before a move is triggered. */
+const SUBJECT_TRIGGER_STREAK = 2;
 /** How long everything must stay empty before we pull back to the full frame. */
 const LOST_GRACE_MS = 1800;
 /** How long the wide shot is left alone once it lands, so it can be read. */
-export const BODY_DWELL_MS = 2500;
+export const WIDE_DWELL_MS = 2500;
 
-/** Face zoom in, hold, pull back out — the whole move, end to end. */
-export const FULL_CYCLE_MS = FACE_ZOOM_IN_MS + FACE_HOLD_MS + BODY_ZOOM_OUT_MS;
+/** Tighten on the subject, hold, pull back out — the whole move, end to end. */
+export const FULL_CYCLE_MS = CLOSE_ZOOM_IN_MS + CLOSE_HOLD_MS + WIDE_ZOOM_OUT_MS;
 
 /**
- * Keeps a second face from yanking the camera straight back into a close-up.
+ * Keeps a second subject from yanking the camera straight back into a close-up.
  *
  * Derived rather than picked: a literal shorter than {@link FULL_CYCLE_MS} lets
  * a new close-up interrupt the pull-back before it has finished, so the wide
- * shot of the whole person — the entire point of the move — is never reached.
+ * shot of the whole scene — the entire point of the move — is never reached.
  * That is exactly what a hardcoded 6000 did here: it cut the 1600 ms pull-back
  * at roughly 600 ms and then looped, forever, while anyone stood in frame.
  */
-export const RETRIGGER_COOLDOWN_MS = FULL_CYCLE_MS + BODY_DWELL_MS;
+export const RETRIGGER_COOLDOWN_MS = FULL_CYCLE_MS + WIDE_DWELL_MS;
 
 const TARGET_SMOOTHING = 0.35;
-const FACE_COVERAGE = 0.45;
-const FACE_MAX_SCALE = 2.8;
-const BODY_COVERAGE = 0.8;
-const BODY_MAX_SCALE = 2;
-// Enough headroom to keep hair and some shoulders in shot; much more than this
-// and the padded box gets so wide that the close-up barely magnifies at all.
-const FACE_PADDING = 0.25;
-const BODY_PADDING = 0.12;
+
+/**
+ * The two framings, and why neither of them is tight.
+ *
+ * Both frame *people*, entire — that is the whole difference from what this
+ * used to do. A face box is a fraction of a person's height, so framing it to
+ * cover most of the view magnified by up to 2.8x and cropped everything below
+ * the chin out of the recording: on a surveillance camera the hands, what they
+ * carry and where they are walking are the evidence, and a portrait throws all
+ * three away.
+ *
+ * Framing a whole person bounds the magnification by itself, and deliberately:
+ * `computeFraming` scales until the padded subject covers `coverage` of the
+ * view, so someone already filling the frame is barely pushed in at all while
+ * someone at the far end of a room is brought right up — which is where a
+ * surveillance zoom is worth anything. `maxScale` only caps the far end.
+ */
+const CLOSE_COVERAGE = 0.9;
+const CLOSE_MAX_SCALE = 2.8;
+const WIDE_COVERAGE = 0.65;
+const WIDE_MAX_SCALE = 1.8;
+// Head, feet and a little air. Small on the close shot because the subject is
+// a whole body already; generous on the wide one, which is a shot of the room.
+const CLOSE_PADDING = 0.08;
+const WIDE_PADDING = 0.2;
 
 /** Ignore re-frames smaller than this — micro-corrections are what make a zoom feel twitchy. */
 const SCALE_EPSILON = 0.08;
@@ -54,8 +71,8 @@ const ZOOM_EPSILON = 0.05;
 
 const PAN_EPSILON = 0.06;
 
-const FACE_FRAMING: FramingOptions = { coverage: FACE_COVERAGE, maxScale: FACE_MAX_SCALE };
-const BODY_FRAMING: FramingOptions = { coverage: BODY_COVERAGE, maxScale: BODY_MAX_SCALE };
+const CLOSE_FRAMING: FramingOptions = { coverage: CLOSE_COVERAGE, maxScale: CLOSE_MAX_SCALE };
+const WIDE_FRAMING: FramingOptions = { coverage: WIDE_COVERAGE, maxScale: WIDE_MAX_SCALE };
 
 const EASING = Easing.bezier(0.25, 0.1, 0.25, 1);
 
@@ -85,10 +102,15 @@ export interface AutoZoom {
 }
 
 /**
- * Drives a slow "look closer, then pull back" camera move: when a face shows up
- * it eases into a head-and-shoulders framing, holds it for {@link FACE_HOLD_MS},
- * then eases out to frame the whole person(s), and finally releases to the full
- * frame once the subject is gone.
+ * Drives a slow "look closer, then pull back" camera move: when someone shows
+ * up it eases into a framing of that person from head to toe, holds it for
+ * {@link CLOSE_HOLD_MS}, then eases out to take in everyone in shot, and
+ * finally releases to the full frame once they are gone.
+ *
+ * Nothing here ever frames a face on its own. Faces choose *which* person the
+ * close shot is built around and are unioned into them so a clipped head still
+ * makes it in — see `subjectBox` — and a person with no face detected at all
+ * (turned away, masked, in the dark) is zoomed on exactly the same.
  *
  * The transform animates on the native driver, so inference work on the JS and
  * frame-processor threads cannot stutter the movement.
@@ -112,7 +134,7 @@ export function useAutoZoom({
    * app built around not re-rendering the viewfinder subtree at all. Stepping
    * it once the transform has arrived keeps the preview continuous, because
    * the two are changed in the same commit and their product is unchanged: the
-   * viewer sees nothing, and the recording gains the close-up for the hold.
+   * viewer sees nothing, and the recording gains the close shot for the hold.
    */
   const [cameraZoom, setCameraZoom] = useState(1);
   const cameraZoomRef = useRef(1);
@@ -122,10 +144,11 @@ export function useAutoZoom({
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lostTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const smoothedFace = useRef<DetectionBox | null>(null);
-  const smoothedBody = useRef<DetectionBox | null>(null);
-  const faceStreak = useRef(0);
-  const lastFaceZoomAt = useRef(0);
+  /** The one person the close shot is built around, and everyone in shot. */
+  const smoothedSubject = useRef<DetectionBox | null>(null);
+  const smoothedScene = useRef<DetectionBox | null>(null);
+  const subjectStreak = useRef(0);
+  const lastCloseZoomAt = useRef(0);
 
   const clearTimers = useCallback(() => {
     if (holdTimer.current) { clearTimeout(holdTimer.current); holdTimer.current = null; }
@@ -179,9 +202,11 @@ export function useAutoZoom({
   ) => {
     const wanted = computeFraming(framed, viewWidth, viewHeight, options).scale;
     const headroom = maxCameraZoom / cameraZoomRef.current;
-    // `tracked` is the raw detection the tracker compares; `framed` the padded
-    // box the framing uses. The two bounds are not interchangeable — see
-    // `captureZoomFor`, which is where the decision lives so it can be swept.
+    // `tracked` is the raw detection the tracker compares — now literally one
+    // of its own person boxes, since the move frames people rather than faces —
+    // and `framed` the padded box the framing uses. The two bounds are not
+    // interchangeable: see `captureZoomFor`, which is where the decision lives
+    // so it can be swept.
     const extra = captureZoomFor(framed, tracked, wanted, headroom);
     if (!(extra > 1 + ZOOM_EPSILON)) return;
 
@@ -213,12 +238,12 @@ export function useAutoZoom({
     // Off the sensor first, and against whatever it was framing: the transform
     // absorbs it in the same commit, then eases the whole thing out from there.
     releaseCamera(
-      smoothedFace.current ?? smoothedBody.current,
-      phaseRef.current === 'body' ? BODY_FRAMING : FACE_FRAMING,
+      smoothedSubject.current ?? smoothedScene.current,
+      phaseRef.current === 'wide' ? WIDE_FRAMING : CLOSE_FRAMING,
     );
-    smoothedFace.current = null;
-    smoothedBody.current = null;
-    faceStreak.current = 0;
+    smoothedSubject.current = null;
+    smoothedScene.current = null;
+    subjectStreak.current = 0;
     setPhaseBoth('idle');
     animateTo(NEUTRAL_FRAMING, duration);
   }, [animateTo, clearTimers, releaseCamera, setPhaseBoth]);
@@ -232,84 +257,85 @@ export function useAutoZoom({
     );
   }, [viewWidth, viewHeight]);
 
-  const goToBody = useCallback(() => {
+  const goToWide = useCallback(() => {
     holdTimer.current = null;
-    const body = smoothedBody.current;
-    if (!body) {
-      release(BODY_ZOOM_OUT_MS);
+    const scene = smoothedScene.current;
+    if (!scene) {
+      release(WIDE_ZOOM_OUT_MS);
       return;
     }
-    setPhaseBoth('body');
+    setPhaseBoth('wide');
     // Widening: the sensor gives its crop back first, so the pull-back starts
     // from the full field of view and the wide shot is genuinely wide — in the
     // file as much as on screen.
-    releaseCamera(smoothedFace.current ?? body, FACE_FRAMING);
-    const tracked = smoothedBody.current ?? body;
-    const framed = padBox(tracked, BODY_PADDING);
+    releaseCamera(smoothedSubject.current ?? scene, CLOSE_FRAMING);
+    const framed = padBox(scene, WIDE_PADDING);
     animateTo(
-      computeFraming(framed, viewWidth, viewHeight, BODY_FRAMING),
-      BODY_ZOOM_OUT_MS,
-      () => handToCamera(framed, tracked, BODY_FRAMING),
+      computeFraming(framed, viewWidth, viewHeight, WIDE_FRAMING),
+      WIDE_ZOOM_OUT_MS,
+      () => handToCamera(framed, scene, WIDE_FRAMING),
     );
   }, [animateTo, handToCamera, release, releaseCamera, setPhaseBoth, viewWidth, viewHeight]);
 
   const submitFrame = useCallback((faces: DetectionBox[], persons: DetectionBox[]) => {
     if (!enabled || viewWidth <= 0 || viewHeight <= 0) return;
 
-    const face = unionBox(faces);
-    const body = unionBox(persons);
+    // No person box, no move — in either phase. A face on its own is not
+    // something this frames, and a face detected where the person detector saw
+    // nobody is exactly the portrait crop the move exists to avoid.
+    const subject = subjectBox(persons, faces);
+    const scene = unionBox(persons);
 
-    if (face) smoothedFace.current = smoothBox(smoothedFace.current, face, TARGET_SMOOTHING);
-    if (body) smoothedBody.current = smoothBox(smoothedBody.current, body, TARGET_SMOOTHING);
+    if (subject) smoothedSubject.current = smoothBox(smoothedSubject.current, subject, TARGET_SMOOTHING);
+    if (scene) smoothedScene.current = smoothBox(smoothedScene.current, scene, TARGET_SMOOTHING);
 
-    const hasSubject = !!face || !!body;
+    const hasSubject = !!subject;
 
     if (hasSubject && lostTimer.current) {
       clearTimeout(lostTimer.current);
       lostTimer.current = null;
     }
     if (!hasSubject) {
-      faceStreak.current = 0;
+      subjectStreak.current = 0;
       if (phaseRef.current !== 'idle' && !lostTimer.current) {
         lostTimer.current = setTimeout(() => { lostTimer.current = null; release(); }, LOST_GRACE_MS);
       }
       return;
     }
 
-    faceStreak.current = face ? faceStreak.current + 1 : 0;
+    subjectStreak.current += 1;
 
-    const canStartFaceZoom =
-      face &&
-      faceStreak.current >= FACE_TRIGGER_STREAK &&
-      phaseRef.current !== 'face' &&
+    const canStartCloseZoom =
+      subjectStreak.current >= SUBJECT_TRIGGER_STREAK &&
+      phaseRef.current !== 'close' &&
       !holdTimer.current &&
-      Date.now() - lastFaceZoomAt.current > RETRIGGER_COOLDOWN_MS;
+      Date.now() - lastCloseZoomAt.current > RETRIGGER_COOLDOWN_MS;
 
-    if (canStartFaceZoom) {
-      lastFaceZoomAt.current = Date.now();
-      setPhaseBoth('face');
-      const framed = padBox(smoothedFace.current!, FACE_PADDING);
-      const tracked = smoothedFace.current!;
+    if (canStartCloseZoom) {
+      lastCloseZoomAt.current = Date.now();
+      setPhaseBoth('close');
+      const tracked = smoothedSubject.current!;
+      const framed = padBox(tracked, CLOSE_PADDING);
       animateTo(
-        computeFraming(framed, viewWidth, viewHeight, FACE_FRAMING),
-        FACE_ZOOM_IN_MS,
-        // Only once the preview has arrived: the sensor then holds the close-up
-        // for the whole hold, which is what puts it in the recording.
-        () => handToCamera(framed, tracked, FACE_FRAMING),
+        computeFraming(framed, viewWidth, viewHeight, CLOSE_FRAMING),
+        CLOSE_ZOOM_IN_MS,
+        // Only once the preview has arrived: the sensor then holds the close
+        // shot for the whole hold, which is what puts it in the recording.
+        () => handToCamera(framed, tracked, CLOSE_FRAMING),
       );
-      holdTimer.current = setTimeout(goToBody, FACE_HOLD_MS + FACE_ZOOM_IN_MS);
+      holdTimer.current = setTimeout(goToWide, CLOSE_HOLD_MS + CLOSE_ZOOM_IN_MS);
       return;
     }
 
     // Already framed on something: drift with the subject rather than re-zooming.
-    if (phaseRef.current === 'face' && smoothedFace.current) {
-      const next = computeFraming(padBox(smoothedFace.current, FACE_PADDING), viewWidth, viewHeight, FACE_FRAMING);
+    if (phaseRef.current === 'close' && smoothedSubject.current) {
+      const next = computeFraming(padBox(smoothedSubject.current, CLOSE_PADDING), viewWidth, viewHeight, CLOSE_FRAMING);
       if (isWorthMoving(next)) animateTo(next, FOLLOW_MS);
-    } else if (phaseRef.current === 'body' && smoothedBody.current) {
-      const next = computeFraming(padBox(smoothedBody.current, BODY_PADDING), viewWidth, viewHeight, BODY_FRAMING);
+    } else if (phaseRef.current === 'wide' && smoothedScene.current) {
+      const next = computeFraming(padBox(smoothedScene.current, WIDE_PADDING), viewWidth, viewHeight, WIDE_FRAMING);
       if (isWorthMoving(next)) animateTo(next, FOLLOW_MS);
     }
-  }, [animateTo, enabled, goToBody, handToCamera, isWorthMoving, release, setPhaseBoth, viewWidth, viewHeight]);
+  }, [animateTo, enabled, goToWide, handToCamera, isWorthMoving, release, setPhaseBoth, viewWidth, viewHeight]);
 
   // Turning the feature off (or unmounting) must not leave the preview zoomed.
   useEffect(() => {

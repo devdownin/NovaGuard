@@ -76,7 +76,7 @@ export function CameraFeed({
   style, active, viewWidth, viewHeight, onFrame, cameraZoom = 1, onZoomRange, cameraRef,
   onProblem, onStage,
 }: CameraFeedProps) {
-  const { perms, settings, reportDetections } = useAppState();
+  const { perms, settings, foreground, reportDetections } = useAppState();
 
   const cameraPosition = devicePositionFor(settings.camera);
   const device = useCameraDevice(cameraPosition, physicalDeviceFilterFor(settings.camera));
@@ -288,6 +288,16 @@ export function CameraFeed({
       device={device}
       format={format}
       isActive={active}
+      // Streamed only while somebody can see it. `isActive` stays true: the
+      // session, the analysis and the recording must all carry on with the
+      // screen off, which is what the foreground service exists for — it is
+      // the preview output alone that has no reader.
+      //
+      // Toggled on going to and from the background, never on starting or
+      // stopping a recording: a preview output added or removed mid-clip is a
+      // capture-session reconfiguration, and this project has already paid for
+      // one of those between two clips.
+      preview={foreground}
       frameProcessor={active ? frameProcessor : undefined}
       pixelFormat="yuv"
       resizeMode="cover"
