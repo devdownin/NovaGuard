@@ -24,6 +24,7 @@ export const isForegroundServiceRunning = jest.fn(() => false);
 export const notifyDetection = jest.fn();
 export const dismissDetectionAlert = jest.fn();
 export const openDetectionChannelSettings = jest.fn();
+export const shareRecording = jest.fn(() => true);
 export const requestNotificationPermission = jest.fn<Promise<PermissionOutcome>, []>(
   async () => 'denied',
 );

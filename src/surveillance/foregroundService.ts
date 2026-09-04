@@ -78,6 +78,23 @@ export function dismissDetectionAlert(): void {
   }
 }
 
+/**
+ * Offers one clip to another app, at the user's request.
+ *
+ * The only way anything recorded here leaves the device, and it takes a tap:
+ * clips are written to the app's private directory, which no other app can
+ * read. False means nothing was opened — the file is gone, or the device has
+ * nothing that accepts a video — and the caller is expected to say so.
+ */
+export function shareRecording(path: string): boolean {
+  if (!NativeSurveillanceService) return false;
+  try {
+    return NativeSurveillanceService.shareRecording(path);
+  } catch {
+    return false;
+  }
+}
+
 /** Android owns sound and vibration per channel; this is where the user sets them. */
 export function openDetectionChannelSettings(): void {
   if (!NativeSurveillanceService) return;

@@ -253,10 +253,31 @@ export function maxZoomTrackable(box: DetectionBox, minOverlap: number, ceiling 
 export const TRACK_OVERLAP_FLOOR = 0.32;
 
 /**
+ * Most of the room the capture is ever allowed to give up.
+ *
+ * A capture zoom of `z` keeps `1/z²` of the sensor's area, and what it drops is
+ * dropped from *everything* downstream: CameraX applies the crop to the whole
+ * use-case group, so the discarded part of the room is neither recorded nor
+ * handed to the detection model. At the 1.77x the tracker bound alone allowed,
+ * two thirds of the field of view stopped existing for as long as the close
+ * shot was held — and somebody walking in from the side during those seconds
+ * was not filmed *and* not seen.
+ *
+ * 1.41 is `sqrt(2)`: half the area kept, half given up. Not a compromise picked
+ * for its looks — it is the point where a surveillance camera stops being able
+ * to miss more of the room than it watches. The magnification the capture
+ * declines is not lost, it stays with the preview transform, which can pan and
+ * therefore keeps framing the subject; only the recording gives up the extra
+ * detail, which is the right way round for a camera whose job is to miss
+ * nothing.
+ */
+export const CAPTURE_ZOOM_CEILING = 1.41;
+
+/**
  * How far the capture may zoom, given everything that limits it at once.
  *
  * Kept here rather than inline in the hook so the decision can be exercised
- * directly: it is three bounds that interact, and a sweep that recomputed them
+ * directly: it is four bounds that interact, and a sweep that recomputed them
  * instead of calling this would go on passing after the real one changed.
  *
  * - `framed` is the padded box the *framing* uses, and bounds the crop that
@@ -264,6 +285,9 @@ export const TRACK_OVERLAP_FLOOR = 0.32;
  * - `tracked` is the raw detection the *tracker* compares, and bounds the jump
  *   in coordinates it can still follow. Bounding the padded box here would
  *   bound the wrong thing.
+ * - {@link CAPTURE_ZOOM_CEILING} bounds how much of the room may be given up at
+ *   all, whatever the subject allows.
+ * - `headroom` is what the device's own lens can still do.
  */
 export function captureZoomFor(
   framed: DetectionBox,
@@ -276,6 +300,7 @@ export function captureZoomFor(
     wantedScale,
     maxZoomKeepingInFrame(framed),
     maxZoomTrackable(tracked, minOverlap),
+    CAPTURE_ZOOM_CEILING,
     headroom,
   );
 }

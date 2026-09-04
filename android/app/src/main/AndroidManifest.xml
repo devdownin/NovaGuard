@@ -44,5 +44,22 @@
         android:name=".surveillance.SurveillanceService"
         android:exported="false"
         android:foregroundServiceType="camera|microphone" />
+
+      <!--
+        Lets the user hand one clip to another app. Clips live in the app's
+        private files directory, which nothing else can read; this grants a
+        temporary, per-file URI when — and only when — someone taps Partager.
+        `exported="false"`: no other app can query the provider, they can only
+        be given a URI by us.
+      -->
+      <provider
+        android:name="androidx.core.content.FileProvider"
+        android:authorities="${applicationId}.fileprovider"
+        android:exported="false"
+        android:grantUriPermissions="true">
+        <meta-data
+          android:name="android.support.FILE_PROVIDER_PATHS"
+          android:resource="@xml/file_paths" />
+      </provider>
     </application>
 </manifest>

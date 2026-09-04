@@ -9,7 +9,7 @@ pas de télémétrie. Le code est commenté en anglais, l'interface est en fran�
 ```bash
 npm ci                 # les tests et le typecheck en dépendent
 npm run typecheck      # tsc --noEmit
-npm run lint           # eslint (0 erreur attendu ; 34 avertissements no-inline-styles connus)
+npm run lint           # eslint (0 erreur attendu ; 32 avertissements no-inline-styles connus)
 npm test               # jest
 npm run android        # build + déploiement sur un appareil ou un émulateur
 ```
@@ -163,10 +163,31 @@ fixe ne corrige pas ça** : une boîte centrée ne fait que grandir et garde
 bien plus qu'elle ne grandit et peut ne plus recouvrir sa position d'avant dès
 1,5×. La borne doit donc être celle du sujet lui-même — `maxZoomTrackable`,
 mesurée avec l'`iou` **du tracker**, sur la boîte **brute** qu'il compare et non
-sur la boîte paddée du cadrage. `captureZoomFor` réunit les trois bornes en un
-seul endroit exprès : trois bornes qui interagissent, et un balayage qui
+sur la boîte paddée du cadrage. `captureZoomFor` réunit les quatre bornes en un
+seul endroit exprès : quatre bornes qui interagissent, et un balayage qui
 recalculerait la décision au lieu de l'appeler continuerait de passer après
 qu'elle a changé — ce qui est arrivé à la première version de ce test.
+
+**Ce que le zoom de capture recadre, le modèle ne le voit plus non plus.**
+CameraX applique la *crop region* à tout le groupe de cas d'usage : à `z`, il
+ne reste que `1/z²` de la surface du capteur, et ce qui tombe ne va ni dans le
+fichier ni au détecteur. Les bornes du sujet ne disent rien de ça — un sujet
+petit et bien centré laissait monter à 1,77×, soit deux tiers de la pièce
+disparus pendant toute la tenue du plan serré, et quelqu'un entrant par le côté
+n'était ni filmé ni vu. D'où `CAPTURE_ZOOM_CEILING = 1,41` (√2 : la moitié de
+la surface conservée). Le grossissement refusé n'est pas perdu, il reste au
+transform de l'aperçu, qui sait panoramiquer : seul l'enregistrement renonce au
+détail supplémentaire, ce qui est le bon sens de l'échange pour une caméra dont
+le métier est de ne rien manquer.
+
+**ML Kit n'est appelé que quand sa réponse peut changer quelque chose.** Depuis
+que le zoom cadre des personnes entières, un visage ne décide plus de la
+distance mais de *qui* suivre — avec une seule personne à l'image, il n'y a rien
+à décider. L'appel natif est donc gardé derrière « au moins deux personnes »,
+ce qui l'élimine dans le cas de très loin le plus fréquent. Le prix est l'union
+qui rattrape une tête coupée par la boîte de détection quand le sujet est seul ;
+le cadrage padde de toute façon, donc c'est un plan un peu plus serré, pas un
+plan sans tête.
 
 Et la main n'est passée au capteur **qu'à l'arrivée** du mouvement : `zoom` est
 une propriété de session native, ce projet n'a pas Reanimated, et l'animer
@@ -192,6 +213,18 @@ qu'on est en train de regarder.
 
 **Une nouvelle référence de tableau est un re-rendu.** `confirmedTracksIfChanged`
 existe pour ça : conserver l'identité quand l'incrustation ne changerait pas.
+
+**Il y a exactement une porte de sortie, et elle demande un geste.** Les clips
+sont écrits dans le répertoire privé de l'application : aucune autre app ne
+peut les lire, rien ne part tout seul, et c'est ce qui donne son sens au
+« traitement 100 % local ». Mais une vidéo qu'on ne peut jamais remettre à une
+assurance ou à la police n'est pas une preuve non plus. `ClipSharing` passe donc
+par un `FileProvider` — une URI de contenu par fichier, une autorisation de
+lecture temporaire qui meurt avec l'activité qui la reçoit — et jamais par un
+chemin `file://`, qu'Android refuse d'une app à l'autre depuis l'API 24. La
+racine déclarée dans `res/xml/file_paths.xml` est exactement le dossier des
+enregistrements : l'élargir ferait la différence entre partager un clip et
+exposer tout le stockage privé de l'application.
 
 **Un clip sans événement est une vidéo perdue.** Le sort d'un enregistrement est
 exhaustif (`clipOutcome`) : rattaché, gardé comme événement sans fichier, ou

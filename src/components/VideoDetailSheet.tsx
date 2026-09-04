@@ -5,24 +5,41 @@ import Video from 'react-native-video';
 import { color, font, radius } from '../theme';
 import { useAppState } from '../state/AppStateContext';
 import { formatBytes } from '../recording/library';
+import { shareRecording } from '../surveillance/foregroundService';
 import { formatWhen } from '../utils/date';
 import { Sheet } from './Sheet';
 import { PlayIcon } from './icons';
-import { SecondaryOutlineButton, TextButton } from './OutlineButton';
+import { PrimaryOutlineButton, SecondaryOutlineButton, TextButton } from './OutlineButton';
 
 export function VideoDetailSheet() {
   const { selected, selectedEvent: event, selectEvent, askDelete } = useAppState();
   const [playing, setPlaying] = useState(false);
+  const [shareFailed, setShareFailed] = useState(false);
 
   // Never carry playback over from the previously opened event.
-  useEffect(() => { setPlaying(false); }, [selected]);
+  useEffect(() => { setPlaying(false); setShareFailed(false); }, [selected]);
 
   const close = useCallback(() => {
     setPlaying(false);
     selectEvent(null);
   }, [selectEvent]);
 
-  const hasClip = !!event?.path;
+  const path = event?.path ?? null;
+  /**
+   * The one door out of the device, and it takes a tap.
+   *
+   * Clips are written to the app's private directory precisely so nothing can
+   * read them — but footage nobody can ever hand to an insurer or the police is
+   * not evidence either. Reported when it fails: the file may have been
+   * reclaimed by the retention sweep since this sheet was opened, and a button
+   * that silently does nothing is the failure this repo has already shipped once.
+   */
+  const share = useCallback(() => {
+    if (!path) return;
+    setShareFailed(!shareRecording(path));
+  }, [path]);
+
+  const hasClip = !!path;
 
   return (
     <Sheet visible={!!event} onClose={close}>
@@ -76,9 +93,18 @@ export function VideoDetailSheet() {
             />
           </View>
 
+          {shareFailed && (
+            <Text style={styles.shareError}>
+              PARTAGE IMPOSSIBLE · LE FICHIER N'EST PLUS LÀ
+            </Text>
+          )}
+
           <View style={styles.actions}>
-            <SecondaryOutlineButton label="Supprimer" onPress={askDelete} style={{ flex: 1 }} />
-            <TextButton label="Fermer" onPress={close} style={{ flex: 1 }} />
+            {hasClip && (
+              <PrimaryOutlineButton label="Partager" onPress={share} style={styles.action} />
+            )}
+            <SecondaryOutlineButton label="Supprimer" onPress={askDelete} style={styles.action} />
+            <TextButton label="Fermer" onPress={close} style={styles.action} />
           </View>
         </View>
       )}
@@ -185,5 +211,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 7,
     marginTop: 14,
+  },
+  action: { flex: 1 },
+  shareError: {
+    fontFamily: font.regular,
+    fontSize: 9.5,
+    letterSpacing: 1.2,
+    color: color.neutral500,
+    textAlign: 'center',
+    marginTop: 12,
+    marginBottom: -2,
   },
 });

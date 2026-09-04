@@ -94,7 +94,7 @@ export interface Settings {
   animal: boolean;
   sens: Sensitivity;
   threshold: number;
-  /** Cinematic auto-zoom: ease in on a detected face, hold, then pull back to the whole person. */
+  /** Cinematic auto-zoom: ease in on a detected person, whole, hold, then pull back to the scene. */
   autoZoom: boolean;
   /**
    * Run the detection model on the CPU, skipping the GPU delegate.
