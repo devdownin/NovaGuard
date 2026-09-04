@@ -23,7 +23,15 @@ import { resolve } from 'path';
 
 const read = (p: string) => readFileSync(resolve(__dirname, '..', p), 'utf8');
 
-const appGradle = read('android/app/build.gradle');
+/**
+ * Comments stripped, because these assertions are about what Gradle executes.
+ * The first version of the closure check below was failing on the comment that
+ * explains the closure — prose naming the mistake read as the mistake.
+ */
+const stripComments = (source: string) =>
+  source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+const appGradle = stripComments(read('android/app/build.gradle'));
 const manifest = read('android/app/src/main/AndroidManifest.xml');
 const gradleProperties = read('android/gradle.properties');
 const gitignore = read('.gitignore');
@@ -56,6 +64,17 @@ describe('signing', () => {
     // it fails here instead, a second in, rather than in the Play Console.
     expect(appGradle).toMatch(/tasks\.matching[^\n]*bundle/);
     expect(appGradle).toContain('throw new GradleException(');
+  });
+
+  it('reads the credentials from a closure, not a script method', () => {
+    // A `def uploadKey(String name) { … }` in a Gradle build script becomes a
+    // member of the script class, which cannot see the script's own local
+    // variables: it failed at configuration time on *every* build with
+    // "Could not get unknown property 'keystoreProperties'". A closure captures
+    // the enclosing scope. Nothing but a real Gradle run catches this — which
+    // is what caught it, one CI cycle after the fact.
+    expect(appGradle).toMatch(/def uploadKey\s*=\s*\{/);
+    expect(appGradle).not.toMatch(/def uploadKey\s*\(/);
   });
 
   it('keeps upload credentials out of the repository', () => {

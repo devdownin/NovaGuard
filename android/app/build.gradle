@@ -86,11 +86,16 @@ if (keystorePropertiesFile.exists()) {
     keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
 }
 
-def uploadKey(String name) {
+// A closure, not a `def uploadKey(…)` method: a method declared in a Gradle
+// build script becomes a member of the script class and cannot see the script's
+// own local variables, so it could not read `keystoreProperties` above —
+// "Could not get unknown property 'keystoreProperties'", at configuration time,
+// on every build. A closure captures the enclosing scope and can.
+def uploadKey = { String name ->
     def value = keystoreProperties.getProperty(name)
         ?: project.findProperty(name)
         ?: System.getenv(name.toUpperCase().replace('.', '_'))
-    return value?.toString()?.trim() ?: null
+    value?.toString()?.trim() ?: null
 }
 
 def uploadStoreFile = uploadKey('novaguard.uploadStoreFile')
@@ -177,7 +182,7 @@ android {
  * bundle is guarded: `assembleRelease` still produces the sideloadable APK the
  * CI artifact has always been.
  */
-tasks.matching { it.name ==~ /bundle(Release|.*Release)/ }.configureEach {
+tasks.matching { it.name ==~ /bundle.*Release/ }.configureEach {
     doFirst {
         if (!hasUploadKey) {
             throw new GradleException(
