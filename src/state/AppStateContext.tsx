@@ -12,6 +12,7 @@ import {
   defaultDetToday, defaultEvents, defaultLastDet, defaultSettings,
 } from './defaults';
 import { dropStaleKeys, EMPTY_STORED_SIZE, storage, StoredSize } from './storage';
+import { useForeground } from './useForeground';
 import { pad } from '../utils/date';
 import { useLatest } from '../utils/useLatest';
 import { FrameDetection } from '../ml/types';
@@ -63,6 +64,11 @@ interface AppStateValue {
   storage: StorageInfo;
   /** Passed down to the Camera so the recorder can drive it. */
   cameraRef: React.RefObject<VisionCamera | null>;
+  /**
+   * False once the app is no longer on screen. Surveillance carries on; only
+   * the work that exists to be looked at stops.
+   */
+  foreground: boolean;
   /** Camera runtime errors and model load failures, reported from CameraFeed. */
   reportCameraProblem: (message: string | null) => void;
   /** Called before each native call an analysed frame makes — see `frameTrace.ts`. */
@@ -276,6 +282,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [lastDet, setLastDet] = useState(defaultLastDet);
   const [recError, setRecError] = useState<string | null>(null);
   const [volume, setVolume] = useState<VolumeSpace>({ free: 0, total: 0 });
+  /**
+   * Surveillance runs with the screen off — that is the whole point of the
+   * foreground service — so nothing about detection or recording reads this.
+   * It gates only the work whose sole product is something on screen.
+   */
+  const foreground = useForeground();
   // Changes only at a cap boundary — minutes apart — so it costs the frame path
   // nothing to hold it in ordinary state.
   const [clipGap, setClipGap] = useState<ClipGapStats>(EMPTY_CLIP_GAP_STATS);
@@ -478,6 +490,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   // because the recording callbacks below read them too.
   const freeSpaceRef = useLatest(volume.free);
   const settingsRef = useLatest(settings);
+  // Through a ref like everything else the frame path reads: taking it as a
+  // dependency would rebuild the worklet every time the app is backgrounded.
+  const foregroundRef = useLatest(foreground);
   /**
    * The recorder's own `start` and `stop`, reached through refs.
    *
@@ -727,6 +742,17 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   const reportDetections = useCallback((detections: FrameDetection[], aspect: number) => {
     const now = Date.now();
+    /**
+     * The viewfinder's state, or nothing when it cannot be seen.
+     *
+     * Every setter below feeds an overlay, a counter or a chip — display and
+     * nothing else. Pushing them from the background re-rendered
+     * `ViewfinderProvider` up to five times a second to move a box on a screen
+     * that is off. The tracking, the session and the recording below are
+     * deliberately *not* behind this: an energy saving that costs a detection
+     * is not a saving.
+     */
+    const shown = foregroundRef.current ? viewfinder.current : null;
     // Through a ref so this stays a once-per-session write: `setSawFrame` is a
     // stable setter, so arming the resume flag costs the frame path nothing and
     // leaves this callback's identity — and the worklet's — untouched.
@@ -736,17 +762,17 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     }
     // What "Sensibilité" asked for is a target; this is what the device manages.
     const measured = countFrame(frameWindowRef.current, now);
-    if (measured != null) viewfinder.current?.setFrameRate(measured);
-    viewfinder.current?.setFrameAspect(aspect);
+    if (measured != null) shown?.setFrameRate(measured);
+    shown?.setFrameAspect(aspect);
 
     const next = updateTracks(tracksRef.current, detections, now);
     tracksRef.current = next;
     // Keep the previous array when nothing moved: every other setter here
     // already bails on `Object.is`, so this is what makes a still scene free.
-    viewfinder.current?.setTracks(prev => confirmedTracksIfChanged(prev, next));
+    shown?.setTracks(prev => confirmedTracksIfChanged(prev, next));
 
     const primary = primaryTrack(next);
-    viewfinder.current?.setPrimaryTrackId(primary ? primary.id : null);
+    shown?.setPrimaryTrackId(primary ? primary.id : null);
 
     if (primary) {
       cancelPostRoll();
@@ -755,7 +781,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         sessionStartRef.current = now;
         segmentStartRef.current = now;
         sessionMaxConfRef.current = primary.maxConfidence;
-        viewfinder.current?.setRecSec(0);
+        shown?.setRecSec(0);
         // Refuse to start on a nearly full volume rather than letting the
         // encoder fail mid-clip and lose the whole passage.
         if (!hasRoomToRecord()) {
@@ -775,7 +801,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         }
       } else {
         sessionMaxConfRef.current = Math.max(sessionMaxConfRef.current, primary.maxConfidence);
-        viewfinder.current?.setRecSec(Math.floor((now - sessionStartRef.current) / 1000));
+        shown?.setRecSec(Math.floor((now - sessionStartRef.current) / 1000));
       }
       setDet(primary.kind);
       return;
@@ -790,7 +816,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         endSession();
       }, postRollMs(settingsRef.current.post));
     }
-  }, [cancelPostRoll, endSession, hasRoomToRecord, settingsRef, startRecording]);
+  }, [cancelPostRoll, endSession, foregroundRef, hasRoomToRecord, settingsRef, startRecording]);
 
   const toggleMonitoring = useCallback(() => {
     // Closing the session has to happen outside the updater: React may invoke
@@ -1055,7 +1081,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     hydrated,
     tab, setTab,
     monitoring, det, detToday, lastDet,
-    recording: isRecording, recError, clipGap, storage: store, cameraRef, reportCameraProblem, reportFrameStage,
+    recording: isRecording, recError, clipGap, storage: store, cameraRef, foreground, reportCameraProblem, reportFrameStage,
     toggleMonitoring, reportDetections,
     events, filter, setFilter, period, setPeriod, periodOpen, togglePeriodOpen, selected, selectedEvent, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete,
@@ -1067,7 +1093,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     onb, perms, onbNext, onbFinish, grantPermission,
   }), [
     hydrated, tab, monitoring, det, detToday, lastDet,
-    isRecording, recError, clipGap, store, cameraRef, reportCameraProblem, reportFrameStage, toggleMonitoring, reportDetections,
+    isRecording, recError, clipGap, store, cameraRef, foreground, reportCameraProblem, reportFrameStage, toggleMonitoring, reportDetections,
     events, filter, period, periodOpen, togglePeriodOpen, selected, selectedEvent, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete, confirmWipe, askWipe, cancelWipe, doWipe,
     settings, toggleSection, cycleCamera, toggleResumeOnLaunch, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom, toggleForceCpu,
