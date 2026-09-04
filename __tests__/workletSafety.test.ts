@@ -35,6 +35,7 @@ import { parse } from '@babel/parser';
 import traverse from '@babel/traverse';
 import generate from '@babel/generator';
 import * as t from '@babel/types';
+import { FrameDetection } from '../src/ml/types';
 
 const ROOT = resolve(__dirname, '..');
 
@@ -242,6 +243,20 @@ describe('the compiled analysis worklet', () => {
     };
   }
 
+  /**
+   * What `interpretDetections` would return for `n` people in shot.
+   *
+   * The face detector is now only asked when there is more than one, so a
+   * closure that reports nobody never reaches it.
+   */
+  function people(n: number) {
+    const boxes: FrameDetection[] = [];
+    for (let i = 0; i < n; i++) {
+      boxes.push({ kind: 'Personne', confidence: 0.9, box: { x: 0.1 * i, y: 0.2, width: 0.15, height: 0.5 } });
+    }
+    return () => boxes;
+  }
+
   function runAnalysis(closure: Record<string, unknown>): void {
     // eslint-disable-next-line no-new-func
     const body = new Function(`return (${analysisWorkletSource()})`)();
@@ -297,7 +312,7 @@ describe('the compiled analysis worklet', () => {
   });
 
   it('claims the face-detection stage only when it runs', () => {
-    const closure = closureFor({ autoZoom: true });
+    const closure = closureFor({ autoZoom: true, interpretDetections: people(2) });
     runAnalysis(closure);
 
     const stages = (closure.onFrameStage as jest.Mock).mock.calls.map(([s]) => s);
@@ -310,6 +325,7 @@ describe('the compiled analysis worklet', () => {
     // nothing else. It used to take the whole frame down with it.
     const closure = closureFor({
       autoZoom: true,
+      interpretDetections: people(2),
       detectFaces: () => { throw new Error('ML Kit down'); },
     });
     runAnalysis(closure);
@@ -324,6 +340,7 @@ describe('the compiled analysis worklet', () => {
   it('skips a face the detector returned without bounds', () => {
     const closure = closureFor({
       autoZoom: true,
+      interpretDetections: people(2),
       detectFaces: () => [{}, { bounds: { x: 32, y: 64, width: 32, height: 64 } }],
     });
     runAnalysis(closure);
@@ -332,6 +349,40 @@ describe('the compiled analysis worklet', () => {
       { x: 0.1, y: 0.1, width: 0.1, height: 0.1 },
     ]);
     expect(closure.onFrameError).not.toHaveBeenCalled();
+  });
+
+  /**
+   * ML Kit costs a native call per analysed frame, and since the zoom frames
+   * whole people its answer only decides *which* person to follow. With one
+   * person in shot there is nothing for it to decide.
+   */
+  describe('when the face detector is worth asking', () => {
+    it('skips it for a lone subject', () => {
+      const detectFaces = jest.fn(() => []);
+      const closure = closureFor({ autoZoom: true, interpretDetections: people(1), detectFaces });
+      runAnalysis(closure);
+
+      expect(detectFaces).not.toHaveBeenCalled();
+      // The frame is still analysed and reported — only the framing hint is skipped.
+      expect(closure.onJsFrame).toHaveBeenCalled();
+      expect((closure.onJsFrame as jest.Mock).mock.calls[0][1]).toEqual([]);
+    });
+
+    it('asks it as soon as there is a choice of subject', () => {
+      const detectFaces = jest.fn(() => []);
+      const closure = closureFor({ autoZoom: true, interpretDetections: people(2), detectFaces });
+      runAnalysis(closure);
+
+      expect(detectFaces).toHaveBeenCalledTimes(1);
+    });
+
+    it('never asks it with the setting off, crowd or not', () => {
+      const detectFaces = jest.fn(() => []);
+      const closure = closureFor({ autoZoom: false, interpretDetections: people(3), detectFaces });
+      runAnalysis(closure);
+
+      expect(detectFaces).not.toHaveBeenCalled();
+    });
   });
 
   it('leaves the stage at the call that threw', () => {

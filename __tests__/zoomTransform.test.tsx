@@ -23,7 +23,7 @@ import {
 } from '../src/camera/useAutoZoom';
 import { DetectionBox } from '../src/ml/types';
 import { DEFAULT_TRACKER_OPTIONS, iou } from '../src/ml/tracker';
-import { boxInZoomedFrame } from '../src/camera/framing';
+import { boxInZoomedFrame, CAPTURE_ZOOM_CEILING } from '../src/camera/framing';
 
 const VIEW_W = 360;
 const VIEW_H = 640;
@@ -324,6 +324,18 @@ describe('the zoom that reaches the recording', () => {
     expect(h.zoom.cameraZoom).toBe(1);
     // The preview still frames them, because its transform can pan.
     expect(h.moves()[0].scale).toBeGreaterThan(1);
+  });
+
+  it('never stops watching more than half the room', () => {
+    const h = mount({ maxCameraZoom: 8 });
+    seePerson(h, PERSON_CENTRED);
+    wait(CLOSE_ZOOM_IN_MS);
+
+    // The crop reaches the detection model as well as the file: past this, more
+    // of the room is unwatched than watched, and someone walking in from the
+    // side during the hold is neither filmed nor seen.
+    expect(h.zoom.cameraZoom).toBeLessThanOrEqual(CAPTURE_ZOOM_CEILING);
+    expect(h.zoom.cameraZoom).toBeGreaterThan(1);
   });
 
   it('never asks for more than the device can do', () => {

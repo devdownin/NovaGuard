@@ -4,6 +4,7 @@
 
 import {
   boxInZoomedFrame,
+  CAPTURE_ZOOM_CEILING,
   captureZoomFor, computeFraming, containedFraction, maxZoomKeepingInFrame, maxZoomTrackable,
   NEUTRAL_FRAMING, padBox, smoothBox, subjectBox, TRACK_OVERLAP_FLOOR, unionBox,
 } from '../src/camera/framing';
@@ -351,5 +352,43 @@ describe('subjectBox', () => {
     for (const key of ['x', 'y', 'width', 'height'] as const) {
       expect(subject[key]).toBeCloseTo(near[key], 9);
     }
+  });
+});
+
+/**
+ * How much of the room the capture is allowed to stop watching.
+ *
+ * A capture zoom of `z` keeps `1/z²` of the sensor area, and the crop reaches
+ * the detection model as well as the file: what it drops is neither recorded
+ * nor seen. The subject's own bounds say nothing about that — a small, dead
+ * centre subject lets the crop go as far as the tracker can follow, which was
+ * 1.77x, or two thirds of the room gone for the length of the close shot.
+ */
+describe('the ceiling on what the capture may give up', () => {
+  // Tiny and dead centre: every other bound is wide open here, so the ceiling
+  // is the only thing that can answer.
+  const centred: DetectionBox = { x: 0.48, y: 0.48, width: 0.04, height: 0.04 };
+
+  it('never gives up more than half the frame area', () => {
+    const zoom = captureZoomFor(centred, centred, 8, 8);
+    expect(zoom).toBeLessThanOrEqual(CAPTURE_ZOOM_CEILING);
+    expect(1 / (zoom * zoom)).toBeGreaterThanOrEqual(0.5);
+  });
+
+  it('still lets the capture zoom at all', () => {
+    // A ceiling that refused everything would be a way of deleting the feature
+    // rather than bounding it.
+    expect(captureZoomFor(centred, centred, 8, 8)).toBeGreaterThan(1.2);
+  });
+
+  it('does not raise a subject that allows less', () => {
+    // Against an edge, the subject's own bound is far below the ceiling and is
+    // the one that has to win.
+    const edge: DetectionBox = { x: 0, y: 0.4, width: 0.2, height: 0.2 };
+    expect(captureZoomFor(edge, edge, 8, 8)).toBeLessThan(1.1);
+  });
+
+  it('does not raise a device that can do less', () => {
+    expect(captureZoomFor(centred, centred, 8, 1.2)).toBeCloseTo(1.2);
   });
 });

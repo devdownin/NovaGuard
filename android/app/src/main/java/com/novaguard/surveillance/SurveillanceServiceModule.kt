@@ -35,6 +35,9 @@ class SurveillanceServiceModule(reactContext: ReactApplicationContext) :
     DetectionNotifier.dismiss(reactApplicationContext)
   }
 
+  override fun shareRecording(path: String): Boolean =
+    ClipSharing.share(reactApplicationContext, path)
+
   override fun openDetectionChannelSettings() {
     DetectionNotifier.openChannelSettings(reactApplicationContext)
   }

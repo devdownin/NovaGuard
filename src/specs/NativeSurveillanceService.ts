@@ -27,6 +27,15 @@ export interface Spec extends TurboModule {
   dismissDetection(): void;
 
   /**
+   * Hands one recorded clip to another app through a chooser.
+   *
+   * Returns false when there was nothing to share — a file the retention sweep
+   * has already reclaimed — or when Android refused to raise a chooser, so the
+   * UI can say so rather than looking like it did nothing.
+   */
+  shareRecording(path: string): boolean;
+
+  /**
    * Opens Android's own settings page for the detection channel. Since Android
    * 8 the platform — not the app — owns whether a channel makes sound or
    * vibrates, so this is the only honest place to send someone who wants to

@@ -240,8 +240,21 @@ export function CameraFeed({
         const outputs = model.runSync([resized]) as Float32Array[];
         const detections = interpretDetections(outputs, { detectPerson, detectAnimal, minConfidence });
 
+        // ML Kit is asked only when its answer can change something. Since the
+        // zoom frames whole people, a face no longer decides how close to get —
+        // it decides *which* person to follow, and with one person in shot
+        // there is nothing to decide. Skipping it there drops a native call per
+        // analysed frame in by far the commonest case. What it costs is the
+        // union that recovers a head the person box clipped, for a lone
+        // subject; the framing pads the box anyway, so that is a slightly
+        // tighter shot rather than a missing one.
+        let people = 0;
+        for (let i = 0; i < detections.length; i++) {
+          if (detections[i].kind === 'Personne') people++;
+        }
+
         const faces: DetectionBox[] = [];
-        if (autoZoom) {
+        if (autoZoom && people > 1) {
           onFrameStage('faces');
           // ML Kit failing is not detection failing. Auto-zoom is cosmetic;
           // seeing a person is what the app is for, and it has already been
