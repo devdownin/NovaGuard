@@ -126,6 +126,21 @@ l'auto-suppression ne récupère jamais jusqu'à une marque qui refuserait encor
 d'enregistrer — supprimer l'historique *et* rester incapable de filmer est le
 pire des deux.
 
+**Le zoom cadre une personne entière, jamais un visage seul.** Il a été
+construit sur la boîte du visage, et c'est ce qui le rendait inutile : à 2,8×
+sur une tête, les mains, ce qu'elles portent et la direction prise sortent du
+cadre — et du fichier — alors que c'est exactement ce qu'une caméra de
+surveillance est là pour garder. Le sujet est donc `subjectBox`, qui rend
+toujours une boîte **de personne**. La détection de visages n'a pas disparu
+mais ne cadre plus rien : elle choisit *qui* regarder quand plusieurs personnes
+sont dans le champ, et son union avec la personne rattrape une boîte qui aurait
+coupé la tête. Deux conséquences qui ne doivent pas être reperdues : un sujet
+sans visage détecté — de dos, masqué, dans le noir — déclenche le mouvement
+comme les autres, et un visage sans personne n'en déclenche aucun. Cadrer un
+corps borne aussi le grossissement tout seul, `computeFraming` s'arrêtant à la
+couverture demandée : quelqu'un qui remplit l'image est à peine rapproché,
+quelqu'un au fond d'une pièce est amené devant.
+
 **Un transform React Native ne touche pas l'enregistrement.** Le zoom
 cinématique a longtemps été un `transform` sur la vue qui contient l'aperçu :
 l'encodeur est en aval de la session de capture, pas de l'arbre de vues, donc le

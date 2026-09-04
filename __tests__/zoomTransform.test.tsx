@@ -19,7 +19,7 @@ import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 import { Animated } from 'react-native';
 import {
-  BODY_ZOOM_OUT_MS, FACE_HOLD_MS, FACE_ZOOM_IN_MS, RELEASE_MS, useAutoZoom,
+  CLOSE_HOLD_MS, CLOSE_ZOOM_IN_MS, RELEASE_MS, useAutoZoom, WIDE_ZOOM_OUT_MS,
 } from '../src/camera/useAutoZoom';
 import { DetectionBox } from '../src/ml/types';
 import { DEFAULT_TRACKER_OPTIONS, iou } from '../src/ml/tracker';
@@ -28,15 +28,16 @@ import { boxInZoomedFrame } from '../src/camera/framing';
 const VIEW_W = 360;
 const VIEW_H = 640;
 
-/** Left of centre and high up — a face, where a standing person's head is. */
-const FACE_LEFT: DetectionBox = { x: 0.15, y: 0.10, width: 0.16, height: 0.16 };
-/** Right of centre, for the mirrored case. */
-const FACE_RIGHT: DetectionBox = { x: 0.69, y: 0.10, width: 0.16, height: 0.16 };
-const BODY: DetectionBox = { x: 0.30, y: 0.20, width: 0.40, height: 0.70 };
+/** Standing left of centre, high in the frame — a person, head to toe. */
+const PERSON_LEFT: DetectionBox = { x: 0.10, y: 0.14, width: 0.16, height: 0.45 };
+/** Mirrored, for the sign of the pan. */
+const PERSON_RIGHT: DetectionBox = { x: 0.74, y: 0.14, width: 0.16, height: 0.45 };
 /** Dead centre, where a centre crop can magnify furthest. */
-const FACE_CENTRED: DetectionBox = { x: 0.42, y: 0.42, width: 0.16, height: 0.16 };
+const PERSON_CENTRED: DetectionBox = { x: 0.42, y: 0.30, width: 0.16, height: 0.40 };
 /** Hard against the left edge: a centre crop cannot magnify this at all. */
-const FACE_AT_EDGE: DetectionBox = { x: 0, y: 0.42, width: 0.16, height: 0.16 };
+const PERSON_AT_EDGE: DetectionBox = { x: 0, y: 0.30, width: 0.16, height: 0.40 };
+/** Where a face sits on `PERSON_LEFT` — inside them, near the top. */
+const FACE_ON_LEFT: DetectionBox = { x: 0.145, y: 0.15, width: 0.07, height: 0.07 };
 
 const T0 = 1_780_000_000_000;
 
@@ -108,10 +109,22 @@ function report(h: Harness, at: number, faces: DetectionBox[], persons: Detectio
   ReactTestRenderer.act(() => { h.zoom.submitFrame(faces, persons); });
 }
 
-/** Two sightings, which is the streak a close-up needs. */
-function seeFace(h: Harness, face: DetectionBox) {
-  report(h, 0, [face], [BODY]);
-  report(h, 200, [face], [BODY]);
+/** Two sightings, which is the streak a close shot needs. */
+function seePerson(h: Harness, person: DetectionBox, faces: DetectionBox[] = []) {
+  report(h, 0, faces, [person]);
+  report(h, 200, faces, [person]);
+}
+
+/** Where a frame-space box lands on screen once a move has been applied. */
+function onScreen(box: DetectionBox, move: Move): DetectionBox {
+  const project = (v: number, s: number, pan: number, size: number) =>
+    (v - 0.5) * s + 0.5 + pan / size;
+  return {
+    x: project(box.x, move.scale, move.translateX, VIEW_W),
+    y: project(box.y, move.scale, move.translateY, VIEW_H),
+    width: box.width * move.scale,
+    height: box.height * move.scale,
+  };
 }
 
 function wait(ms: number) {
@@ -128,42 +141,107 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-it('magnifies when it eases into a face', () => {
+it('magnifies when it eases in on someone', () => {
   const h = mount();
-  seeFace(h, FACE_LEFT);
+  seePerson(h, PERSON_LEFT);
 
   const [move] = h.moves();
-  // A "close-up" that does not magnify is the failure this cannot detect from
-  // phases alone: the machine would report `face` either way.
+  // A "close shot" that does not magnify is the failure this cannot detect from
+  // phases alone: the machine would report `close` either way.
   expect(move.scale).toBeGreaterThan(1);
-  expect(move.duration).toBe(FACE_ZOOM_IN_MS);
+  expect(move.duration).toBe(CLOSE_ZOOM_IN_MS);
+});
+
+/**
+ * The point of the change: the move frames a person, entire.
+ *
+ * Framed on the face box — which is what this used to do — a subject at this
+ * distance is magnified until their own feet are off screen, and the recording
+ * keeps a portrait instead of what the person was doing. Asserted on the
+ * projected rectangle rather than on the scale, because it is the subject
+ * leaving the shot that is the failure, not any particular number.
+ */
+describe('what ends up in the shot', () => {
+  const cases: Array<[string, DetectionBox, DetectionBox[]]> = [
+    ['left of centre', PERSON_LEFT, []],
+    ['left of centre, face detected', PERSON_LEFT, [FACE_ON_LEFT]],
+    ['right of centre', PERSON_RIGHT, []],
+    ['centred', PERSON_CENTRED, []],
+    ['against an edge', PERSON_AT_EDGE, []],
+  ];
+
+  it.each(cases)('keeps the whole person in frame: %s', (_label, person, faces) => {
+    const h = mount();
+    seePerson(h, person, faces);
+
+    const shot = onScreen(person, h.moves()[0]);
+    expect({
+      top: shot.y >= -1e-6,
+      bottom: shot.y + shot.height <= 1 + 1e-6,
+      left: shot.x >= -1e-6,
+      right: shot.x + shot.width <= 1 + 1e-6,
+    }).toEqual({ top: true, bottom: true, left: true, right: true });
+  });
+
+  it('frames the same person whether or not their face was found', () => {
+    const withFace = mount();
+    seePerson(withFace, PERSON_LEFT, [FACE_ON_LEFT]);
+    const framedWithFace = withFace.moves()[0];
+
+    jest.restoreAllMocks();
+    const without = mount();
+    seePerson(without, PERSON_LEFT);
+    const framedWithout = without.moves()[0];
+
+    // A face inside the subject says *who* to look at, never how close to get:
+    // the two framings differ only by the face's own union with the body, which
+    // here is entirely inside it.
+    expect(framedWithFace.scale).toBeCloseTo(framedWithout.scale, 6);
+    expect(framedWithFace.translateX).toBeCloseTo(framedWithout.translateX, 6);
+    expect(framedWithFace.translateY).toBeCloseTo(framedWithout.translateY, 6);
+  });
+
+  it('looks at the person whose face was found, not simply the biggest', () => {
+    const h = mount();
+    // Bigger, nearer, turned away — and a smaller one facing the camera.
+    const turnedAway: DetectionBox = { x: 0.60, y: 0.20, width: 0.30, height: 0.70 };
+    const facing: DetectionBox = { x: 0.08, y: 0.30, width: 0.16, height: 0.40 };
+    const theirFace: DetectionBox = { x: 0.12, y: 0.31, width: 0.07, height: 0.07 };
+
+    report(h, 0, [theirFace], [turnedAway, facing]);
+    report(h, 200, [theirFace], [turnedAway, facing]);
+
+    // Left of centre: the camera moves right. Framed on the larger figure it
+    // would go the other way.
+    expect(h.moves()[0].translateX).toBeGreaterThan(0);
+  });
 });
 
 it('pans towards the subject rather than away from it', () => {
   const left = mount();
-  seeFace(left, FACE_LEFT);
+  seePerson(left, PERSON_LEFT);
   const leftMove = left.moves()[0];
 
   jest.restoreAllMocks();
   const right = mount();
-  seeFace(right, FACE_RIGHT);
+  seePerson(right, PERSON_RIGHT);
   const rightMove = right.moves()[0];
 
-  // A face left of centre has to be brought right, and vice versa. A sign error
-  // here frames the opposite corner of the screen — and every phase and every
-  // geometry test still passes, because neither looks at the two together.
+  // Someone left of centre has to be brought right, and vice versa. A sign
+  // error here frames the opposite corner of the screen — and every phase and
+  // every geometry test still passes, because neither looks at the two together.
   expect(leftMove.translateX).toBeGreaterThan(0);
   expect(rightMove.translateX).toBeLessThan(0);
-  // Both faces sit high in the frame, so both pull the image down.
+  // Both stand high in the frame, so both pull the image down.
   expect(leftMove.translateY).toBeGreaterThan(0);
   expect(rightMove.translateY).toBeGreaterThan(0);
 });
 
 it('never pans far enough to expose an edge', () => {
   const h = mount();
-  seeFace(h, FACE_LEFT);
-  wait(FACE_ZOOM_IN_MS + FACE_HOLD_MS);        // through to the wide shot
-  report(h, 6000, [], [BODY]);
+  seePerson(h, PERSON_LEFT);
+  wait(CLOSE_ZOOM_IN_MS + CLOSE_HOLD_MS);      // through to the wide shot
+  report(h, 6000, [], [PERSON_LEFT]);
 
   for (const move of h.moves()) {
     // At scale s the image overhangs the view by (s-1)/2 on each side; panning
@@ -175,16 +253,16 @@ it('never pans far enough to expose an edge', () => {
   }
 });
 
-it('pulls back to a wider shot than the close-up, without zooming out past 1x', () => {
+it('pulls back to a wider shot than the close one, without zooming out past 1x', () => {
   const h = mount();
-  seeFace(h, FACE_LEFT);
+  seePerson(h, PERSON_LEFT);
   const closeUp = h.moves()[0];
 
-  wait(FACE_ZOOM_IN_MS + FACE_HOLD_MS);
+  wait(CLOSE_ZOOM_IN_MS + CLOSE_HOLD_MS);
   const wide = h.moves()[h.moves().length - 1];
 
-  expect(wide.duration).toBe(BODY_ZOOM_OUT_MS);
-  // The whole point of the move: the wide shot shows more than the close-up.
+  expect(wide.duration).toBe(WIDE_ZOOM_OUT_MS);
+  // The whole point of the move: the wide shot shows more than the close one.
   expect(wide.scale).toBeLessThan(closeUp.scale);
   // But it is still a framing, not a zoom-out — 1x is the floor.
   expect(wide.scale).toBeGreaterThanOrEqual(1);
@@ -201,7 +279,7 @@ it('pulls back to a wider shot than the close-up, without zooming out past 1x', 
 describe('the zoom that reaches the recording', () => {
   it('leaves the capture alone while the move is still running', () => {
     const h = mount({ maxCameraZoom: 8 });
-    seeFace(h, FACE_CENTRED);
+    seePerson(h, PERSON_CENTRED);
 
     // Changing it mid-move would jump the preview: the transform is animating
     // towards a framing computed against the field of view it started from.
@@ -210,20 +288,20 @@ describe('the zoom that reaches the recording', () => {
 
   it('hands the magnification to the sensor once the preview has arrived', () => {
     const h = mount({ maxCameraZoom: 8 });
-    seeFace(h, FACE_CENTRED);
-    wait(FACE_ZOOM_IN_MS);
+    seePerson(h, PERSON_CENTRED);
+    wait(CLOSE_ZOOM_IN_MS);
 
-    // Without this the close-up exists only on screen, which is the whole
+    // Without this the close shot exists only on screen, which is the whole
     // complaint this answers.
     expect(h.zoom.cameraZoom).toBeGreaterThan(1);
   });
 
   it('gives back exactly what it took, so the preview does not jump', () => {
     const h = mount({ maxCameraZoom: 8 });
-    seeFace(h, FACE_CENTRED);
+    seePerson(h, PERSON_CENTRED);
     const asked = h.moves()[h.moves().length - 1].scale;
 
-    wait(FACE_ZOOM_IN_MS);
+    wait(CLOSE_ZOOM_IN_MS);
 
     // Read off the value rather than the animation: the hand-over is a `setValue`
     // in the same commit as the zoom, deliberately not an animation — there is
@@ -238,10 +316,10 @@ describe('the zoom that reaches the recording', () => {
   it('refuses to crop a subject out of the recording to zoom in on it', () => {
     const h = mount({ maxCameraZoom: 8 });
     // Hard against the left edge. A centre crop at the scale the preview uses
-    // would put this face entirely outside the recorded frame — on a
+    // would put this person entirely outside the recorded frame — on a
     // surveillance camera, losing the only thing worth recording.
-    seeFace(h, FACE_AT_EDGE);
-    wait(FACE_ZOOM_IN_MS);
+    seePerson(h, PERSON_AT_EDGE);
+    wait(CLOSE_ZOOM_IN_MS);
 
     expect(h.zoom.cameraZoom).toBe(1);
     // The preview still frames them, because its transform can pan.
@@ -250,16 +328,16 @@ describe('the zoom that reaches the recording', () => {
 
   it('never asks for more than the device can do', () => {
     const h = mount({ maxCameraZoom: 1.5 });
-    seeFace(h, FACE_CENTRED);
-    wait(FACE_ZOOM_IN_MS);
+    seePerson(h, PERSON_CENTRED);
+    wait(CLOSE_ZOOM_IN_MS);
 
     expect(h.zoom.cameraZoom).toBeLessThanOrEqual(1.5);
   });
 
   it('stays at 1 on a device that cannot zoom, with the preview unaffected', () => {
     const h = mount();   // maxCameraZoom defaults to 1
-    seeFace(h, FACE_CENTRED);
-    wait(FACE_ZOOM_IN_MS);
+    seePerson(h, PERSON_CENTRED);
+    wait(CLOSE_ZOOM_IN_MS);
 
     expect(h.zoom.cameraZoom).toBe(1);
     expect(h.moves()[0].scale).toBeGreaterThan(1);
@@ -267,12 +345,12 @@ describe('the zoom that reaches the recording', () => {
 
   it('gives the sensor back its full field of view when the subject leaves', () => {
     const h = mount({ maxCameraZoom: 8 });
-    seeFace(h, FACE_CENTRED);
-    wait(FACE_ZOOM_IN_MS);
+    seePerson(h, PERSON_CENTRED);
+    wait(CLOSE_ZOOM_IN_MS);
     expect(h.zoom.cameraZoom).toBeGreaterThan(1);
 
     report(h, 400, [], []);
-    wait(FACE_HOLD_MS);
+    wait(CLOSE_HOLD_MS);
 
     // Anything else leaves the camera permanently cropped, recording a slice of
     // the room it was pointed at.
@@ -284,21 +362,24 @@ describe('the zoom that reaches the recording', () => {
    * recomputed. A sweep that redid the arithmetic itself would go on passing
    * after the hook stopped calling it — which is exactly what happened to the
    * first version of this, and how a flat ceiling looked like it worked.
+   *
+   * The box swept is now one of the tracker's own: the move frames people, so
+   * the bound is measured on the very box `updateTracks` will compare.
    */
-  it('never zooms further than the tracker can follow, wherever the face is', () => {
-    const positions = [0, 0.1, 0.19, 0.25, 0.34, 0.42];
+  it('never zooms further than the tracker can follow, wherever they stand', () => {
+    const positions = [0, 0.08, 0.16, 0.24, 0.32, 0.43];
 
     for (const x of positions) {
       jest.restoreAllMocks();
       const h = mount({ maxCameraZoom: 8 });
-      const face = { x, y: 0.42, width: 0.14, height: 0.14 };
-      seeFace(h, face);
-      wait(FACE_ZOOM_IN_MS);
+      const person = { x, y: 0.30, width: 0.14, height: 0.40 };
+      seePerson(h, person);
+      wait(CLOSE_ZOOM_IN_MS);
 
       // Same measure the tracker will apply, on the same box it holds: below
       // its threshold the subject is dropped and re-confirmed from scratch,
       // leaving no confirmed detection at all for a couple of frames.
-      const overlap = iou(face, boxInZoomedFrame(face, h.zoom.cameraZoom));
+      const overlap = iou(person, boxInZoomedFrame(person, h.zoom.cameraZoom));
       expect({ x, overlap: overlap >= DEFAULT_TRACKER_OPTIONS.iouThreshold })
         .toEqual({ x, overlap: true });
     }
@@ -306,8 +387,8 @@ describe('the zoom that reaches the recording', () => {
 
   it('releases the capture when the setting is switched off mid-move', () => {
     const h = mount({ maxCameraZoom: 8 }) as Harness & { setEnabled: (on: boolean) => void };
-    seeFace(h, FACE_CENTRED);
-    wait(FACE_ZOOM_IN_MS);
+    seePerson(h, PERSON_CENTRED);
+    wait(CLOSE_ZOOM_IN_MS);
     expect(h.zoom.cameraZoom).toBeGreaterThan(1);
 
     h.setEnabled(false);
@@ -318,9 +399,9 @@ describe('the zoom that reaches the recording', () => {
 
 it('returns the transform to neutral when the subject is gone', () => {
   const h = mount();
-  seeFace(h, FACE_LEFT);
+  seePerson(h, PERSON_LEFT);
   report(h, 400, [], []);
-  wait(FACE_HOLD_MS);       // past the lost grace period
+  wait(CLOSE_HOLD_MS);      // past the lost grace period
 
   const last = h.moves()[h.moves().length - 1];
   // Anything short of exactly neutral leaves the preview permanently cropped.
@@ -329,13 +410,13 @@ it('returns the transform to neutral when the subject is gone', () => {
 
 it('releases the zoom when the setting is switched off mid-move', () => {
   const h = mount() as Harness & { setEnabled: (on: boolean) => void };
-  seeFace(h, FACE_LEFT);
-  expect(h.zoom.phase).toBe('face');
+  seePerson(h, PERSON_LEFT);
+  expect(h.zoom.phase).toBe('close');
 
   h.setEnabled(false);
 
   // Consuming the setting, not just storing it: a switch that leaves the
-  // preview cropped on a face is a switch that did nothing.
+  // preview cropped on a subject is a switch that did nothing.
   expect(h.zoom.phase).toBe('idle');
   const last = h.moves()[h.moves().length - 1];
   expect(last).toMatchObject({ scale: 1, translateX: 0, translateY: 0 });
@@ -344,8 +425,8 @@ it('releases the zoom when the setting is switched off mid-move', () => {
 
 it('moves all three channels as one gesture', () => {
   const h = mount();
-  seeFace(h, FACE_LEFT);
-  wait(FACE_ZOOM_IN_MS + FACE_HOLD_MS);
+  seePerson(h, PERSON_LEFT);
+  wait(CLOSE_ZOOM_IN_MS + CLOSE_HOLD_MS);
 
   // Recorded per move by construction above; this pins the reason it holds —
   // three channels on three durations is a wobble, not a camera move.

@@ -187,7 +187,7 @@ export function Viewfinder() {
       {autoZoom.phase !== 'idle' && (
         <View style={styles.zoomChip}>
           <Text style={styles.zoomChipText}>
-            {autoZoom.phase === 'face' ? 'ZOOM VISAGE' : 'PLAN LARGE'}
+            {autoZoom.phase === 'close' ? 'PLAN SERRÉ' : 'PLAN LARGE'}
           </Text>
         </View>
       )}
