@@ -283,6 +283,16 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [recError, setRecError] = useState<string | null>(null);
   const [volume, setVolume] = useState<VolumeSpace>({ free: 0, total: 0 });
   /**
+   * Asks the OS what is free and publishes it.
+   *
+   * Every path that deletes a clip owes a call to this **after** the unlink has
+   * resolved: `getFSInfo` reports what the volume holds at the instant it is
+   * asked, so measuring alongside a delete still in flight returns the space
+   * the file is about to give back, and the figure on screen then sat wrong
+   * until the next 30 s sweep happened to correct it.
+   */
+  const refreshVolume = useCallback(async () => setVolume(await volumeSpace()), []);
+  /**
    * Surveillance runs with the screen off — that is the whole point of the
    * foreground service — so nothing about detection or recording reads this.
    * It gates only the work whose sole product is something on screen.
@@ -890,10 +900,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     const ids = new Set(expired.map(e => e.id));
     deleteFiles(expired.map(e => e.path)).then(() => {
-      if (!cancelled) setEvents(evs => evs.filter(e => !ids.has(e.id)));
+      if (cancelled) return;
+      setEvents(evs => evs.filter(e => !ids.has(e.id)));
+      refreshVolume();
     });
     return () => { cancelled = true; };
-  }, [hydrated, events, settings.retention]);
+  }, [hydrated, events, settings.retention, refreshVolume]);
 
   // ── disk pressure ────────────────────────────────────────────────────
   // On its own cadence rather than the library's: measuring costs a native
@@ -918,8 +930,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     // Re-measure rather than assume: the next sweep must decide against what
     // the volume actually reports, or it would keep reclaiming against a
     // free-space figure the deletions have already made stale.
-    setVolume(await volumeSpace());
-  }, [eventsRef, settingsRef]);
+    await refreshVolume();
+  }, [eventsRef, refreshVolume, settingsRef]);
 
   useEffect(() => {
     if (!hydrated) return undefined;
@@ -944,11 +956,15 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     [events, selected],
   );
   const doDelete = useCallback(() => {
-    if (selectedEvent) deleteFile(selectedEvent.path);
+    const path = selectedEvent?.path ?? null;
     setEvents(evs => evs.filter(e => e.id !== selected));
     setSelected(null);
     setConfirmDelete(false);
-    sweepDisk();
+    // Chained, not fired alongside: the sweep measures the volume, and it used
+    // to do so while this very unlink was still in flight — so "Espace" kept
+    // showing the deleted clip's bytes as taken until the periodic sweep, up to
+    // 30 s later. `doWipe` below already did it this way.
+    deleteFile(path).then(sweepDisk);
   }, [selected, selectedEvent, sweepDisk]);
 
   const askWipe = useCallback(() => setConfirmWipe(true), []);
