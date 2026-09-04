@@ -50,7 +50,40 @@ npm run android
 
 ### Récupérer un APK sans installer l'environnement Android
 
-Le workflow [`CI`](.github/workflows/ci.yml) construit un APK installable après chaque fusion sur `main`, lors de la publication d'un tag de version (ex. `v1.0.0`, automatiquement joint à la *Release* GitHub), et à la demande sur n'importe quelle branche : onglet **Actions** → *CI* → **Run workflow** (choisir la branche), puis récupérer `novaguard-release-apk` dans les artefacts du run une fois terminé. Aucun secret de signature n'est nécessaire — le build `release` est signé avec le keystore de debug du dépôt, ce qui suffit à installer l'application sur un appareil de test mais pas à la publier (voir [Signed APK](https://reactnative.dev/docs/signed-apk-android) pour un vrai keystore de production).
+Le workflow [`CI`](.github/workflows/ci.yml) construit un APK installable après chaque fusion sur `main`, lors de la publication d'un tag de version (ex. `v1.0.0`, automatiquement joint à la *Release* GitHub), et à la demande sur n'importe quelle branche : onglet **Actions** → *CI* → **Run workflow** (choisir la branche), puis récupérer `novaguard-release-apk` dans les artefacts du run une fois terminé. Aucun secret de signature n'est nécessaire pour cet APK : il est signé avec le keystore de debug du dépôt, ce qui suffit à l'installer sur un appareil de test. Ce qui part sur le Play Store est un autre artefact — un *App Bundle* signé par une clé d'upload qui ne vit pas dans le dépôt — voir [Publication](#publication-sur-google-play).
+
+## Publication sur Google Play
+
+Le dépôt sait produire l'artefact que Play accepte :
+
+```bash
+docker build -t novaguard-android .
+BUILD_SCRIPT=scripts/build-aab.sh SIGNING_DIR=/chemin/du/keystore \
+  scripts/build-apk-in-docker.sh novaguard-android
+```
+
+- `versionName` vient de `package.json` — un seul endroit à incrémenter ;
+  `versionCode` est le compteur d'upload de Play, passé par la CI
+  (`-PnovaguardVersionCode=`).
+- Les identifiants de la clé d'upload viennent de `android/keystore.properties`
+  (git-ignoré), de `~/.gradle/gradle.properties` ou de l'environnement. Sans eux,
+  l'APK se construit toujours et **le bundle refuse de se construire** plutôt que
+  d'être signé par le keystore de debug, que Play rejette.
+- Pousser un tag `vX.Y.Z` déclenche le job `build-aab`, qui produit l'artefact
+  `novaguard-play-bundle`. Il n'est pas joint à la Release GitHub : un bundle
+  signé n'a rien à faire sur une page de téléchargement publique.
+
+La marche à suivre complète — création de la clé, secrets GitHub, formulaire
+*Data safety*, justification des services de premier plan, brouillon de fiche
+Store, visuels manquants — est dans [`docs/PLAY_STORE.md`](docs/PLAY_STORE.md).
+La politique de confidentialité, dont Play exige une URL publique, est dans
+[`PRIVACY.md`](PRIVACY.md).
+
+> **À trancher avant de créer la fiche :** `minSdk` est à 36 (Android 16). C'est
+> un choix assumé — un seul niveau de plateforme, donc aucune branche de
+> compatibilité dans le code — mais sur le Store il rend l'application
+> incompatible avec l'immense majorité des téléphones en circulation. Les trois
+> options sont détaillées en tête de `docs/PLAY_STORE.md`.
 
 ## Structure du projet
 
