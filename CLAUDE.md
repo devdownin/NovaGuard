@@ -23,8 +23,9 @@ Le flux principal va de la caméra à l'historique :
 
 ```
 CameraFeed (frame processor, worklet)
+  → letterbox             réduit l'image sans la déformer dans l'entrée carrée
   → interpretDetections   décode les 4 tenseurs d'EfficientDet-Lite0
-  → updateTracks          suivi IoU : confirme sur N images, tolère une occlusion
+  → updateTracks          suivi IoU + prédiction : confirme sur N images, tolère une occlusion
   → reportDetections      ouvre/ferme une session, pilote l'enregistrement
   → useRecorder           VisionCamera, cap de durée, clip rendu par callback
   → videoStore            nommage, renommage sans écrasement, suppression
@@ -254,6 +255,54 @@ l'anti-patron, et `__tests__/accessibility.test.tsx` vérifie qu'il n'est nulle
 part — en inspectant les nœuds **hôtes** porteurs d'un responder, c'est-à-dire ce
 qu'Android donne réellement à TalkBack, et pas les composants qui reçoivent une
 prop `onPress`.
+
+**Le seuil de confiance est une porte d'entrée, pas un filtre.** Il a été les
+deux, et le prix était que toute boîte sous la barre n'existait pour personne :
+EfficientDet-Lite0 en 320 px note un sujet lointain, de dos ou dans l'ombre entre
+0,4 et 0,6 et oscille autour de n'importe quelle ligne tracée là-dedans, donc un
+seul seuil manque ces passages ou enregistre le bruit. Les deux rôles sont
+séparés : `floorConfidence` (`interpretDetections`, constante basse) décide ce
+qui est **associé**, `startConfidence` (`tracker.ts`, le réglage utilisateur)
+décide ce qui peut **ouvrir** une piste. Une piste ouverte survit donc aux
+regards faibles. Conséquence à ne pas reperdre : le réglage n'atteint plus le
+worklet, il est lu par `reportDetections` — à travers `settingsRef`, comme tout
+le reste sur ce chemin — ce qui est aussi ce qui le rend enfin testable
+(`settingsWiring.test.tsx`), le worklet étant hors de portée sous Jest.
+
+**Le recouvrement seul ne suit personne.** À 3 i/s, quelqu'un qui traverse le
+champ se déplace de plus que sa propre largeur entre deux regards : `iou` vaut 0,
+la piste est abandonnée, et sa remplaçante demande `confirmAfter` regards pendant
+lesquels le sujet bouge encore. À « Basse » (1 i/s) c'était tout passage qui n'est
+pas quelqu'un d'immobile. D'où une vitesse lissée par piste, une association
+contre la position **prédite**, et un repli par distance des centres quand les
+boîtes ne se touchent plus — borné par `maxTravel` et par un rapport de tailles,
+sinon deux personnes qui se croisent échangent leurs pistes. Le score composite
+(`1 + iou` contre `1 - distance/portée`) garantit qu'un vrai recouvrement gagne
+toujours la passe gourmande. **La prédiction ne sert qu'à l'association** : la
+boîte affichée et celle qui cadre reste la dernière *vue*, sinon l'application
+dessine quelqu'un là où il n'y a personne.
+
+**Le modèle n'est pas invariant à l'étirement.** L'image entière était mise à
+l'échelle en 320×320 sans conserver ses proportions, donc un cadre 16:9 arrivait
+écrasé et une personne debout faisait 1,78× sa largeur relative. Invisible — les
+boîtes restent des boîtes — et coûteux exactement sur les sujets déjà limites.
+`letterbox.ts` réduit uniformément et pose l'image dans un coin, le reste à zéro
+(la préprocessing d'EfficientDet elle-même), et `scaleX`/`scaleY` remettent les
+boîtes à l'échelle du cadre. Deux pièges : le plugin **redimensionne avant de
+tourner**, donc la taille demandée est dans les axes du tampon, échangés quand
+`swapsAxes` ; et le tampon d'entrée est alloué par image analysée, parce qu'un
+tampon gardé au niveau module serait recopié dans le runtime worklet à chaque
+appel — donc réalloué de toute façon, plus une copie.
+
+**La suppression des doublons du modèle est par classe.** Une silhouette
+accroupie ou lointaine ressort à la fois en `person` et en `dog`/`bear`, et
+chaque doublon serait sa propre piste, sa propre notification et sa propre ligne
+d'historique. `interpretDetections` réduit donc deux hypothèses de genres
+différents qui se recouvrent à plus de 60 % à la plus sûre — en parcourant à
+l'envers une liste déjà triée par confiance, ce qui est ce qui garantit que le
+survivant est la meilleure. Son `overlapOf` est une copie délibérée de l'`iou` du
+tracker : celui-ci est du JavaScript ordinaire, et une fonction ordinaire
+atteinte depuis un worklet est un talon qui lève.
 
 **Une nouvelle référence de tableau est un re-rendu.** `confirmedTracksIfChanged`
 existe pour ça : conserver l'identité quand l'incrustation ne changerait pas.

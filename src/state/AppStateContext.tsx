@@ -16,7 +16,9 @@ import { useForeground } from './useForeground';
 import { pad } from '../utils/date';
 import { useLatest } from '../utils/useLatest';
 import { FrameDetection } from '../ml/types';
-import { confirmedTracksIfChanged, primaryTrack, Track, updateTracks } from '../ml/tracker';
+import {
+  confirmedTracksIfChanged, DEFAULT_TRACKER_OPTIONS, primaryTrack, Track, updateTracks,
+} from '../ml/tracker';
 import { Clip, useRecorder } from '../recording/useRecorder';
 import {
   bytesToReclaim, clipFileName, clipOutcome, eventsToReclaim, expiredEvents, lowSpaceBytes,
@@ -778,7 +780,15 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     if (measured != null) shown?.setFrameRate(measured);
     shown?.setFrameAspect(aspect);
 
-    const next = updateTracks(tracksRef.current, detections, now);
+    // The user's threshold is the tracker's entry gate, not the detector's
+    // filter: `interpretDetections` now hands over everything above a low floor
+    // so a track already open can survive the weak looks a real subject produces
+    // when they turn away or step into shadow. Read through the ref like every
+    // other setting on this path — a dependency here would rebuild the worklet.
+    const next = updateTracks(tracksRef.current, detections, now, {
+      ...DEFAULT_TRACKER_OPTIONS,
+      startConfidence: settingsRef.current.threshold / 100,
+    });
     tracksRef.current = next;
     // Keep the previous array when nothing moved: every other setter here
     // already bails on `Object.is`, so this is what makes a still scene free.

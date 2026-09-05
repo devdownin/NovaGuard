@@ -7,6 +7,7 @@ import {
   confirmedTracksIfChanged,
   DEFAULT_TRACKER_OPTIONS,
   iou,
+  predictedBox,
   primaryTrack,
   resetTrackIds,
   sameVisibleTracks,
@@ -264,5 +265,155 @@ describe('confirmedTracksIfChanged', () => {
     const previous = confirmedTracks(confirm(0.3));
     const tracks = confirm(0.36);
     expect(confirmedTracksIfChanged(previous, tracks)).toEqual(confirmedTracks(tracks));
+  });
+});
+
+describe('opening a track', () => {
+  // The user's threshold is an entry gate now, not a filter on what the
+  // detector reports: `interpretDetections` hands over everything above a low
+  // floor so an open track can survive the weak looks a real subject produces.
+  const weak = (x: number): FrameDetection =>
+    ({ kind: 'Personne', confidence: 0.45, box: box(x, 0.3) });
+
+  it('ignores a detection too weak to be trusted on its own', () => {
+    expect(updateTracks([], [weak(0.3)], 1000)).toHaveLength(0);
+  });
+
+  it('keeps an open track alive on looks that could not have opened it', () => {
+    // The whole point of the split. One gate at 0.6 turned a subject who
+    // half-turned away into a subject who had left, ending the recording
+    // mid-passage and writing the rest as a second event.
+    let tracks = updateTracks([], [person(0.3)], 1000);
+    tracks = updateTracks(tracks, [person(0.3)], 1100);
+    const id = tracks[0].id;
+
+    tracks = updateTracks(tracks, [weak(0.31)], 1200);
+    tracks = updateTracks(tracks, [weak(0.32)], 1300);
+    expect(tracks).toHaveLength(1);
+    expect(tracks[0].id).toBe(id);
+    expect(tracks[0].misses).toBe(0);
+    expect(confirmedTracks(tracks)).toHaveLength(1);
+  });
+
+  it('still remembers the best look, not the weak ones it survived on', () => {
+    // The history event records this, so a passage seen clearly once must not
+    // be filed under the 45% it scored while turning away.
+    let tracks = updateTracks([], [person(0.3, 0.3, 0.88)], 1000);
+    tracks = updateTracks(tracks, [weak(0.3)], 1100);
+    expect(tracks[0].maxConfidence).toBeCloseTo(0.88);
+  });
+
+  it('follows the threshold it is given', () => {
+    const strict = { ...DEFAULT_TRACKER_OPTIONS, startConfidence: 0.95 };
+    expect(updateTracks([], [person(0.3, 0.3, 0.9)], 1000, strict)).toHaveLength(0);
+    expect(updateTracks([], [person(0.3, 0.3, 0.96)], 1000, strict)).toHaveLength(1);
+  });
+});
+
+describe('following a subject that moves', () => {
+  /**
+   * Overlap alone cannot follow anybody at these rates: at 3 fps a person
+   * crossing the field of view moves further than their own width between
+   * looks, so `iou` reads 0 and the track is abandoned — and its replacement
+   * needs `confirmAfter` looks to be trusted, by which point it has moved
+   * again. The app filmed people who stopped and missed people who walked past.
+   */
+  const walking = (x: number, confidence = 0.9): FrameDetection =>
+    ({ kind: 'Personne', confidence, box: box(x, 0.3) });
+
+  it('keeps one identity across a step wider than the subject', () => {
+    let tracks = updateTracks([], [walking(0.1)], 1000);
+    const id = tracks[0].id;
+    // 0.25 per look, against a box 0.2 wide: no overlap at all.
+    tracks = updateTracks(tracks, [walking(0.35)], 1333);
+    expect(iou(box(0.1, 0.3), box(0.35, 0.3))).toBe(0);
+    expect(tracks).toHaveLength(1);
+    expect(tracks[0].id).toBe(id);
+    expect(confirmedTracks(tracks)).toHaveLength(1);
+  });
+
+  it('confirms a subject crossing the frame instead of restarting on every look', () => {
+    let tracks: Track[] = [];
+    let t = 0;
+    for (const x of [0.05, 0.3, 0.55, 0.8]) {
+      t += 333;
+      tracks = updateTracks(tracks, [walking(x)], t);
+    }
+    expect(tracks).toHaveLength(1);
+    expect(tracks[0].hits).toBe(4);
+    expect(confirmedTracks(tracks)).toHaveLength(1);
+  });
+
+  it('reaches further once it knows which way the subject is going', () => {
+    // Velocity is what makes the second half of a passage cheaper to follow
+    // than the first: the gate is centred on where the subject should be.
+    let tracks = updateTracks([], [walking(0.05)], 0);
+    tracks = updateTracks(tracks, [walking(0.3)], 333);
+    tracks = updateTracks(tracks, [walking(0.55)], 666);
+    expect(tracks[0].vx).toBeGreaterThan(0);
+
+    const predicted = predictedBox(tracks[0], 999);
+    expect(predicted.x).toBeGreaterThan(0.55);
+    expect(predicted.x).toBeLessThanOrEqual(0.8);
+  });
+
+  it('follows a step it would refuse from a subject it knows nothing about', () => {
+    // The prediction is not just a nicety on top of the proximity gate: it
+    // moves the gate to where the subject is going. A box 0.2 x 0.4 reaches
+    // one diagonal, 0.447; this step is 0.50 from where the subject last was
+    // and only 0.375 from where it was heading.
+    let moving = updateTracks([], [walking(0.05)], 0);
+    moving = updateTracks(moving, [walking(0.30)], 333);
+    const id = moving[0].id;
+    moving = updateTracks(moving, [walking(0.80)], 666);
+    expect(moving).toHaveLength(1);
+    expect(moving[0].id).toBe(id);
+
+    // The same step, from a subject seen only once, is a different subject:
+    // nothing says it went that way rather than any other.
+    let standing = updateTracks([], [walking(0.30)], 333);
+    standing = updateTracks(standing, [walking(0.80)], 666);
+    expect(standing).toHaveLength(2);
+  });
+
+  it('predicts nothing for a subject that has only been seen once', () => {
+    const tracks = updateTracks([], [walking(0.3)], 1000);
+    expect(predictedBox(tracks[0], 2000)).toEqual(tracks[0].box);
+  });
+
+  it('draws the subject where it was seen, never where it was predicted', () => {
+    // A prediction on screen is the app drawing a person where nobody is.
+    let tracks = updateTracks([], [walking(0.05)], 0);
+    tracks = updateTracks(tracks, [walking(0.3)], 333);
+    tracks = updateTracks(tracks, [], 666);
+    expect(tracks[0].box.x).toBeCloseTo(0.3);
+  });
+
+  it('refuses a box of a wildly different size, however close it lands', () => {
+    // Two subjects at different depths crossing paths: the far one must not
+    // inherit the near one's track just because their centres coincide.
+    let tracks = updateTracks([], [walking(0.4)], 1000);
+    const far: FrameDetection = {
+      kind: 'Personne', confidence: 0.9, box: { x: 0.44, y: 0.38, width: 0.04, height: 0.08 },
+    };
+    tracks = updateTracks(tracks, [far], 1100);
+    expect(tracks).toHaveLength(2);
+  });
+
+  it('refuses a box beyond any distance a subject could have travelled', () => {
+    let tracks = updateTracks([], [walking(0.05)], 1000);
+    const id = tracks[0].id;
+    tracks = updateTracks(tracks, [walking(0.9)], 1100);
+    expect(tracks).toHaveLength(2);
+    expect(tracks.find(t => t.box.x === 0.9)!.id).not.toBe(id);
+  });
+
+  it('prefers a real overlap to a nearer box the prediction only reaches', () => {
+    // Greedy association takes the best score first, and an overlap must
+    // outrank every proximity match whatever their distances.
+    let tracks = updateTracks([], [walking(0.3)], 1000);
+    tracks = updateTracks(tracks, [walking(0.32), walking(0.55)], 1100);
+    const continued = tracks.find(t => t.hits === 2)!;
+    expect(continued.box.x).toBeCloseTo(0.32);
   });
 });

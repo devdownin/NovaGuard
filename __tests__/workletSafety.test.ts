@@ -137,6 +137,7 @@ function worklettedSources(directory: string): string[] {
 const WORKLET_SOURCES = worklettedSources(resolve(ROOT, 'src'));
 const INTERPRET = resolve(ROOT, 'src/ml/interpretDetections.ts');
 const ORIENTATION = resolve(ROOT, 'src/camera/orientation.ts');
+const LETTERBOX = resolve(ROOT, 'src/ml/letterbox.ts');
 
 describe('worklet closures', () => {
   it('covers every file that declares one', () => {
@@ -144,7 +145,7 @@ describe('worklet closures', () => {
     // the frame processor would otherwise leave this whole suite passing on
     // nothing at all.
     expect(WORKLET_SOURCES.map(f => basename(f)).sort()).toEqual([
-      'CameraFeed.tsx', 'interpretDetections.ts', 'orientation.ts',
+      'CameraFeed.tsx', 'interpretDetections.ts', 'letterbox.ts', 'orientation.ts',
     ]);
   });
 
@@ -168,12 +169,15 @@ describe('worklet closures', () => {
     // processor calls it — which is a dead app, not a degraded one.
     const orientation = loadCompiled(ORIENTATION);
     const interpret = loadCompiled(INTERPRET);
+    const letterbox = loadCompiled(LETTERBOX);
 
     for (const [name, fn] of [
       ['uprightRotation', orientation.uprightRotation],
       ['uprightAspect', orientation.uprightAspect],
       ['swapsAxes', orientation.swapsAxes],
       ['interpretDetections', interpret.interpretDetections],
+      ['letterboxFor', letterbox.letterboxFor],
+      ['letterboxInto', letterbox.letterboxInto],
     ] as const) {
       expect(`${name}: ${typeof fn.__workletHash}`).toBe(`${name}: number`);
     }
@@ -221,16 +225,21 @@ describe('the compiled analysis worklet', () => {
 
   /** A closure with everything the body destructures, and nothing else. */
   function closureFor(overrides: Record<string, unknown> = {}) {
+    const inner = { width: 180, height: 320 };
     return {
-      resize: () => new Uint8Array(320 * 320 * 3),
-      frame: { width: 1920, height: 1080, orientation: 'portrait' },
+      resize: () => new Uint8Array(inner.width * inner.height * 3),
+      frame: { width: 1080, height: 1920, orientation: 'portrait' },
       MODEL_INPUT_SIZE: 320,
+      MODEL_INPUT_CHANNELS: 3,
+      DETECTION_FLOOR: 0.3,
       uprightRotation: () => '0deg',
+      swapsAxes: () => false,
+      letterboxFor: () => inner,
+      letterboxInto: () => new Uint8Array(320 * 320 * 3),
       model: { runSync: () => [new Float32Array(4), new Float32Array(1), new Float32Array(1), Float32Array.from([0])] },
       interpretDetections: () => [],
       detectPerson: true,
       detectAnimal: true,
-      minConfidence: 0.75,
       autoZoom: false,
       detectFaces: () => [],
       viewW: 320,
@@ -448,7 +457,7 @@ describe('the compiled detection worklet', () => {
         Float32Array.from([0.9, 0.8]),
         Float32Array.from([2]),
       ],
-      { detectPerson: true, detectAnimal: true, minConfidence: 0.5 },
+      { detectPerson: true, detectAnimal: true, floorConfidence: 0.5, scaleX: 1, scaleY: 1 },
     );
 
     expect(results.map((r: { kind: string }) => r.kind)).toEqual(['Personne', 'Animal']);
@@ -465,11 +474,15 @@ describe('the compiled detection worklet', () => {
     ];
 
     expect(
-      interpretDetections(outputs, { detectPerson: true, detectAnimal: false, minConfidence: 0.5 })
+      interpretDetections(outputs, {
+        detectPerson: true, detectAnimal: false, floorConfidence: 0.5, scaleX: 1, scaleY: 1,
+      })
         .map((r: { kind: string }) => r.kind),
     ).toEqual(['Personne']);
     expect(
-      interpretDetections(outputs, { detectPerson: false, detectAnimal: true, minConfidence: 0.5 })
+      interpretDetections(outputs, {
+        detectPerson: false, detectAnimal: true, floorConfidence: 0.5, scaleX: 1, scaleY: 1,
+      })
         .map((r: { kind: string }) => r.kind),
     ).toEqual(['Animal']);
   });

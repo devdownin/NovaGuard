@@ -21,8 +21,8 @@ jest.mock('../src/surveillance/foregroundService');
 
 const SETTINGS_KEY = '@novaguard:settings';
 
-const person = (x: number): FrameDetection =>
-  ({ kind: 'Personne', confidence: 0.9, box: { x, y: 0.3, width: 0.2, height: 0.5 } });
+const person = (x: number, confidence = 0.9): FrameDetection =>
+  ({ kind: 'Personne', confidence, box: { x, y: 0.3, width: 0.2, height: 0.5 } });
 
 async function storedSettings(): Promise<Settings> {
   return JSON.parse((await AsyncStorage.getItem(SETTINGS_KEY))!);
@@ -119,4 +119,55 @@ it('honours a post-roll changed mid-session', async () => {
 
   await ReactTestRenderer.act(async () => { jest.advanceTimersByTime(20_000); });
   expect(handle.state.events).toHaveLength(1);
+});
+
+/**
+ * The confidence threshold is consumed in `reportDetections`, not in the frame
+ * processor: it decides which detections may *open* a track, while weaker ones
+ * are still handed over so an open track can survive them. That move is what
+ * makes it testable at all — the worklet is out of reach under Jest — and this
+ * is the third leg the file exists for, since exposed and persisted say nothing
+ * about whether anything reads it.
+ */
+describe('the confidence threshold', () => {
+  const seePerson = async (handle: Awaited<ReturnType<typeof mountProvider>>, confidence: number) => {
+    await ReactTestRenderer.act(async () => {
+      handle.state.reportDetections([person(0.3, confidence)], 9 / 16);
+      handle.state.reportDetections([person(0.31, confidence)], 9 / 16);
+    });
+  };
+
+  it('opens no session for a subject below it', async () => {
+    const handle = await mountProvider();
+    await ReactTestRenderer.act(async () => { handle.state.setThreshold(80); });
+
+    await seePerson(handle, 0.6);
+    expect(handle.state.det).toBeNull();
+  });
+
+  it('opens one for a subject above it', async () => {
+    const handle = await mountProvider();
+    await ReactTestRenderer.act(async () => { handle.state.setThreshold(50); });
+
+    await seePerson(handle, 0.6);
+    expect(handle.state.det).toBe('Personne');
+  });
+
+  it('keeps a session alive on looks that could not have opened it', async () => {
+    // The point of the split: a subject who turns away, or steps into shadow,
+    // drops well below the threshold without having gone anywhere. One gate
+    // ended the recording there and filed the rest as a second event.
+    const handle = await mountProvider();
+    await ReactTestRenderer.act(async () => { handle.state.setThreshold(70); });
+
+    await seePerson(handle, 0.85);
+    expect(handle.state.det).toBe('Personne');
+
+    await ReactTestRenderer.act(async () => {
+      handle.state.reportDetections([person(0.32, 0.41)], 9 / 16);
+      handle.state.reportDetections([person(0.33, 0.38)], 9 / 16);
+    });
+    expect(handle.state.events).toHaveLength(0);
+    expect(handle.state.det).toBe('Personne');
+  });
 });
