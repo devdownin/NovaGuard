@@ -16,11 +16,20 @@ import React, { useState } from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import faceDetector from 'react-native-vision-camera-face-detector';
+import tflite from 'react-native-fast-tflite';
 import { AppStateProvider } from '../src/state/AppStateContext';
 import { CameraFeed } from '../src/components/CameraFeed';
 import { mountProvider } from '../testing/mountProvider';
 
 jest.mock('../src/surveillance/foregroundService');
+
+const tfliteMock = tflite as unknown as {
+  __calls: () => { source: unknown; delegate: string }[];
+  __reset: () => void;
+};
+
+const STANDARD = require('../assets/models/efficientdet-lite0.tflite');
+const PRECISE = require('../assets/models/efficientdet-lite2.tflite');
 
 const detectorMock = faceDetector as unknown as {
   __created: () => unknown[];
@@ -48,6 +57,7 @@ beforeEach(async () => {
   jest.useFakeTimers();
   jest.clearAllMocks();
   detectorMock.__reset();
+  tfliteMock.__reset();
   await AsyncStorage.clear();
 });
 
@@ -104,4 +114,33 @@ it('takes the ML Kit listeners back down', async () => {
   expect(detectorMock.__stopListeners).not.toHaveBeenCalled();
   await ReactTestRenderer.act(async () => { tree.unmount(); });
   expect(detectorMock.__stopListeners).toHaveBeenCalled();
+});
+
+/**
+ * "Détection étendue" is the third leg a setting needs: exposed, persisted and
+ * *consumed*. The other two are checked in `settingsWiring.test.tsx`; only here
+ * is it visible which file the camera actually asks the runtime to load, and a
+ * switch that loads the same model either way is the inert-section failure this
+ * repo has already shipped once.
+ */
+describe('which detector is loaded', () => {
+  const sourcesAsked = () => tfliteMock.__calls().map(c => c.source);
+
+  it('is the 320 px model by default', async () => {
+    await mount();
+    expect(sourcesAsked()).toContain(STANDARD);
+    expect(sourcesAsked()).not.toContain(PRECISE);
+  });
+
+  it('is the 448 px model once the setting is on', async () => {
+    const { box } = await mount();
+    await ReactTestRenderer.act(async () => { box.state.togglePreciseDetection(); });
+    expect(sourcesAsked()).toContain(PRECISE);
+  });
+
+  it('asks for two different files — the assets are not the same model twice', async () => {
+    // Guards the two assertions above from passing on an asset transformer that
+    // gives every `.tflite` the same handle.
+    expect(STANDARD).not.toEqual(PRECISE);
+  });
 });

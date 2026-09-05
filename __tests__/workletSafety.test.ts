@@ -229,7 +229,7 @@ describe('the compiled analysis worklet', () => {
     return {
       resize: () => new Uint8Array(inner.width * inner.height * 3),
       frame: { width: 1080, height: 1920, orientation: 'portrait' },
-      MODEL_INPUT_SIZE: 320,
+      inputSize: 320,
       MODEL_INPUT_CHANNELS: 3,
       DETECTION_FLOOR: 0.3,
       uprightRotation: () => '0deg',
@@ -271,6 +271,17 @@ describe('the compiled analysis worklet', () => {
     const body = new Function(`return (${analysisWorkletSource()})`)();
     body.apply({ __closure: closure });
   }
+
+  it('is exercised through the closure the compiler actually asks for', () => {
+    // `closureFor` claims to carry everything the body destructures and nothing
+    // else, and nothing checked it: a captured name that was renamed left a key
+    // reading `undefined`, which a stubbed helper happily ignores — so every
+    // test below went on passing against a worklet the runtime could not run.
+    const declared = analysisWorkletSource().match(/const\s*{([^}]*)}\s*=\s*this\.__closure/);
+    expect(declared).not.toBeNull();
+    const needed = declared![1].split(',').map(n => n.trim().split(':')[0].trim()).filter(Boolean);
+    expect(needed.sort()).toEqual(Object.keys(closureFor()).sort());
+  });
 
   it('analyses on the thread the frame arrives on', () => {
     // `runAsync` moves the work to a second worklet context and keeps the

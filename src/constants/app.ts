@@ -22,6 +22,7 @@ export const THIRD_PARTY_LICENSES: ThirdPartyLicense[] = [
   { name: 'react-native-video', noteKey: 'lic.react-native-video', license: 'MIT' },
   { name: 'react-native-worklets-core', noteKey: 'lic.react-native-worklets-core', license: 'MIT' },
   { name: 'EfficientDet-Lite0 (COCO)', noteKey: 'lic.efficientdet-lite0-coco', license: 'Apache-2.0' },
+  { name: 'EfficientDet-Lite2 (COCO)', noteKey: 'lic.efficientdet-lite2-coco', license: 'Apache-2.0' },
   { name: 'react-native-safe-area-context', noteKey: 'lic.react-native-safe-area-context', license: 'MIT' },
   { name: 'react-native-svg', noteKey: 'lic.react-native-svg', license: 'MIT' },
   { name: 'react-native-linear-gradient', noteKey: 'lic.react-native-linear-gradient', license: 'MIT' },

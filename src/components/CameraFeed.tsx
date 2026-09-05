@@ -14,14 +14,28 @@ import { uprightBoxToViewBox } from '../camera/framing';
 import { useDetectionModel } from '../camera/useDetectionModel';
 import { interpretDetections } from '../ml/interpretDetections';
 import { letterboxFor, letterboxInto } from '../ml/letterbox';
+import { SENSITIVITY_PROFILES } from '../ml/sensitivity';
 import { frameErrorMessage } from '../camera/frameErrors';
 import { FrameStage } from '../camera/frameTrace';
 import { qualityBitRate, qualityResolution } from '../recording/library';
 import { DetectionBox, FrameDetection } from '../ml/types';
 
-const MODEL = require('../../assets/models/efficientdet-lite0.tflite');
-/** EfficientDet-Lite0 takes a 320x320 uint8 image (verified against the model file). */
-const MODEL_INPUT_SIZE = 320;
+/**
+ * The two detectors, and the input each was exported with (both verified
+ * against the model files themselves: uint8, NHWC, and the same four output
+ * tensors in the same order).
+ *
+ * They come from the same TensorFlow mirror and carry the *same* 90-entry
+ * labelmap, byte for byte — which is the one thing that has to hold for
+ * `labels.ts` to stay valid, and the one that silently kills detection when it
+ * does not. Lite2 is markedly better on small subjects, which on a surveillance
+ * camera is most of them, and costs roughly three times the inference: hence a
+ * setting rather than a swap.
+ */
+const MODEL_STANDARD = require('../../assets/models/efficientdet-lite0.tflite');
+const MODEL_PRECISE = require('../../assets/models/efficientdet-lite2.tflite');
+const STANDARD_INPUT_SIZE = 320;
+const PRECISE_INPUT_SIZE = 448;
 /** `pixelFormat: 'rgb'` — three bytes per pixel. */
 const MODEL_INPUT_CHANNELS = 3;
 
@@ -39,18 +53,6 @@ const MODEL_INPUT_CHANNELS = 3;
  * near-zero slots the model always returns.
  */
 const DETECTION_FLOOR = 0.3;
-
-/**
- * Frames per second handed to the model.
- *
- * This is what "Sensibilité" actually controls, and it is worth being explicit
- * about: it sets how often the scene is looked at, so it governs how quickly a
- * subject is confirmed and how responsive the auto-zoom feels. It no longer
- * governs how long an occlusion is tolerated — the tracker counts that in
- * milliseconds (see `dropAfterMs`) so the same gap means the same thing at
- * every setting.
- */
-const FPS_BY_SENSITIVITY = { Basse: 1, Moyenne: 3, Haute: 5 } as const;
 
 interface CameraFeedProps {
   style: StyleProp<ViewStyle>;
@@ -115,9 +117,14 @@ export function CameraFeed({
   ]);
 
   const { resize } = useResizePlugin();
+  const precise = settings.preciseDetection;
   // `failed` used to be computed and thrown away, so a model both delegates
   // refused looked exactly like a working camera that never sees anything.
-  const { model, failed: modelFailed } = useDetectionModel(MODEL, settings.forceCpu);
+  const { model, failed: modelFailed } = useDetectionModel(
+    precise ? MODEL_PRECISE : MODEL_STANDARD,
+    settings.forceCpu,
+  );
+  const inputSize = precise ? PRECISE_INPUT_SIZE : STANDARD_INPUT_SIZE;
 
   useEffect(() => {
     if (!onProblem) return;
@@ -206,7 +213,9 @@ export function CameraFeed({
   const maxZoomFactor = device ? device.maxZoom / device.neutralZoom : 1;
   useEffect(() => { onZoomRange?.(maxZoomFactor); }, [maxZoomFactor, onZoomRange]);
 
-  const targetFps = FPS_BY_SENSITIVITY[settings.sens];
+  // "Sensibilité" sets three things that trade against each other; the other
+  // two reach the tracker, in `reportDetections` (see `sensitivity.ts`).
+  const targetFps = SENSITIVITY_PROFILES[settings.sens].fps;
   const detectPerson = settings.person;
   const detectAnimal = settings.animal;
   const autoZoom = settings.autoZoom;
@@ -254,7 +263,7 @@ export function CameraFeed({
         // so the size asked for is in the frame buffer's own axes — swapped for
         // a landscape-held phone, whose buffer is uprighted by a quarter turn.
         const aspect = uprightAspect(frame.width, frame.height, frame.orientation);
-        const inner = letterboxFor(aspect, MODEL_INPUT_SIZE);
+        const inner = letterboxFor(aspect, inputSize);
         const swap = swapsAxes(frame.orientation);
         const resized = resize(frame, {
           crop: { x: 0, y: 0, width: frame.width, height: frame.height },
@@ -265,7 +274,7 @@ export function CameraFeed({
           pixelFormat: 'rgb',
           dataType: 'uint8',
         });
-        const input = letterboxInto(resized, inner, MODEL_INPUT_SIZE, MODEL_INPUT_CHANNELS);
+        const input = letterboxInto(resized, inner, inputSize, MODEL_INPUT_CHANNELS);
         onFrameStage('inference');
         // The model's 4 outputs are always float32 (see interpretDetections' doc comment).
         const outputs = model.runSync([input]) as Float32Array[];
@@ -275,8 +284,8 @@ export function CameraFeed({
           floorConfidence: DETECTION_FLOOR,
           // Boxes come back as fractions of the square, so the padded axis has
           // to be stretched back out before anything downstream sees them.
-          scaleX: MODEL_INPUT_SIZE / inner.width,
-          scaleY: MODEL_INPUT_SIZE / inner.height,
+          scaleX: inputSize / inner.width,
+          scaleY: inputSize / inner.height,
         });
 
         // ML Kit is asked only when its answer can change something. Since the
@@ -325,7 +334,7 @@ export function CameraFeed({
         onFrameError(failure?.message ?? 'erreur inconnue');
       }
     });
-  }, [model, resize, onJsFrame, onFrameError, onFrameStage, detectFaces, autoZoom, viewW, viewH, targetFps, detectPerson, detectAnimal]);
+  }, [model, inputSize, resize, onJsFrame, onFrameError, onFrameStage, detectFaces, autoZoom, viewW, viewH, targetFps, detectPerson, detectAnimal]);
 
   if (!perms.cam || device == null) return null;
 

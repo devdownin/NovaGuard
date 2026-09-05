@@ -9,7 +9,7 @@ pas de télémétrie. Le code est commenté en anglais, l'interface est en fran�
 ```bash
 npm ci                 # les tests et le typecheck en dépendent
 npm run typecheck      # tsc --noEmit
-npm run lint           # eslint (0 erreur attendu ; 32 avertissements no-inline-styles connus)
+npm run lint           # eslint (0 erreur attendu ; 36 avertissements no-inline-styles connus)
 npm test               # jest
 npm run android        # build + déploiement sur un appareil ou un émulateur
 ```
@@ -24,7 +24,8 @@ Le flux principal va de la caméra à l'historique :
 ```
 CameraFeed (frame processor, worklet)
   → letterbox             réduit l'image sans la déformer dans l'entrée carrée
-  → interpretDetections   décode les 4 tenseurs d'EfficientDet-Lite0
+  → interpretDetections   décode les 4 tenseurs d'EfficientDet-Lite0 / -Lite2
+  → detectionsInZone      écarte ce qui se tient hors de la zone surveillée
   → updateTracks          suivi IoU + prédiction : confirme sur N images, tolère une occlusion
   → reportDetections      ouvre/ferme une session, pilote l'enregistrement
   → useRecorder           VisionCamera, cap de durée, clip rendu par callback
@@ -303,6 +304,53 @@ l'envers une liste déjà triée par confiance, ce qui est ce qui garantit que l
 survivant est la meilleure. Son `overlapOf` est une copie délibérée de l'`iou` du
 tracker : celui-ci est du JavaScript ordinaire, et une fonction ordinaire
 atteinte depuis un worklet est un talon qui lève.
+
+**Une zone de détection peut éteindre l'application en silence.** C'est le seul
+filtre qui coupe les faux positifs qu'aucun seuil n'atteint — un téléphone sur
+un rebord de fenêtre voit la rue et le trottoir autant que le jardin, et chaque
+passant est une détection *correcte* de quelqu'un que personne n'a demandé. Mais
+elle est stockée, invisible une fois la surveillance lancée, et une zone qui ne
+laisse rien passer ressemble exactement à une pièce vide. Trois choses en
+découlent. `MIN_ZONE_SIDE` refuse une zone qu'un appui parasite aurait pu
+dessiner. Le test porte sur le **point bas** de la boîte (les pieds), pas sur
+son centre ni sur son contenu entier : quelqu'un sur le trottoir penché
+au-dessus de la clôture a la tête et les épaules dans la zone, il est quand même
+sur le trottoir. Et la zone est stockée en espace-cadre, jamais en espace-vue :
+ce qui a été tracé l'a été sur un viseur d'une certaine taille, et un téléphone
+tourné en a un autre — `viewBoxToUprightBox` convertit une fois, à l'entrée.
+
+**Dessiner la zone fait tourner la caméra sans que ce soit de la surveillance.**
+L'éditeur a besoin de l'image à laquelle la zone s'applique, donc `active` vaut
+aussi vrai pour lui. Deux gardes vont avec, et aucune n'est optionnelle :
+`reportDetections` sort avant de suivre quoi que ce soit — sinon une session
+s'ouvrirait, et un enregistrement avec, derrière un écran dont les boutons
+disent « Annuler » — mais **après** avoir posé `frameAspect`, que l'éditeur
+utilise pour convertir et que seule une image analysée peut apprendre. Et
+l'auto-zoom est coupé pendant l'édition : sur un aperçu transformé, ce que le
+doigt trace n'est pas là où le détecteur regarde.
+
+**Deux modèles, un seul labelmap.** « Détection étendue » charge
+EfficientDet-Lite2 (448 px) au lieu de Lite0 (320 px) : nettement meilleur sur
+les sujets lointains — ce qui, sur une caméra de surveillance, est la plupart
+d'entre eux — pour environ trois fois le calcul, d'où un réglage et non un
+remplacement. Les deux viennent du même miroir TensorFlow et portent le **même**
+labelmap de 90 entrées, octet pour octet ; c'est la seule condition pour que
+`labels.ts` reste valide, et celle dont la violation tue la détection en silence
+(un `???` en tête décale toutes les classes d'un cran). Seule la taille d'entrée
+change, et elle est passée au worklet comme une valeur capturée.
+
+**« Sensibilité » règle trois choses qui s'échangent.** Elle n'en réglait qu'une
+— la cadence — et les deux extrémités de l'échelle disaient alors autre chose que
+ce qu'elles annoncent : à « Basse », 1 i/s avec `confirmAfter: 2` veut dire une
+seconde entière avant le moindre enregistrement, donc le début de chaque passage
+perdu ; à « Haute », les images supplémentaires n'achetaient que de la batterie,
+puisque ce qu'on acceptait de chacune ne changeait pas. Corroborer sur le regard
+suivant coûte 200 ms à 5 i/s et une seconde à 1 i/s : à « Basse » cette
+corroboration est donc abandonnée, et **payée** par un score plus élevé. Lâcher
+les deux ferait d'une seule mauvaise image un enregistrement. Le tout vit dans
+`sensitivity.ts` plutôt qu'éparpillé entre `CameraFeed` et `reportDetections`,
+pour la même raison que `captureZoomFor` : un test qui recalculerait l'échange
+au lieu de l'appeler continuerait de passer après qu'il a changé.
 
 **Une nouvelle référence de tableau est un re-rendu.** `confirmedTracksIfChanged`
 existe pour ça : conserver l'identité quand l'incrustation ne changerait pas.

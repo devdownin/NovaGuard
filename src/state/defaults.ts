@@ -17,6 +17,8 @@ export const defaultSettings: Settings = {
   threshold: 60,
   autoZoom: true,
   forceCpu: false,
+  preciseDetection: false,
+  zone: null,
   post: '10 s',
   max: '2 min',
   quality: '1080p',

@@ -87,6 +87,27 @@ export function SetupScreen() {
             <Switch value={settings.autoZoom} onValueChange={s.toggleAutoZoom} accessibilityLabel={t('setup.autoZoom')} />
           </SettingRow>
           <SettingRow
+            label={t('setup.precise')}
+            subtitle={t('setup.precise.sub')}
+          >
+            <Switch
+              value={settings.preciseDetection}
+              onValueChange={s.togglePreciseDetection}
+              accessibilityLabel={t('setup.precise')}
+            />
+          </SettingRow>
+          <SettingRow label={t('setup.zone')} subtitle={t('setup.zone.sub')}>
+            <ValueButton
+              label={t(settings.zone ? 'setup.zone.set' : 'setup.zone.all')}
+              onPress={s.beginZoneEdit}
+              active={settings.zone != null}
+              accessibilityLabel={t('a11y.setting', {
+                name: t('setup.zone'),
+                value: t(settings.zone ? 'setup.zone.set' : 'setup.zone.all'),
+              })}
+            />
+          </SettingRow>
+          <SettingRow
             label={t('setup.forceCpu')}
             subtitle={t('setup.forceCpu.sub')}
           >

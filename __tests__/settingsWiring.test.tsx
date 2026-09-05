@@ -62,6 +62,8 @@ it('writes each control back to disk', async () => {
     state.toggleNotif();
     state.toggleNotifDet();
     state.toggleResumeOnLaunch();
+    state.togglePreciseDetection();
+    state.saveZone({ x: 0.5, y: 0.3, width: 0.5, height: 0.7 });
     state.setSensitivity('Haute');
     state.setThreshold(42);
     state.setRetention('1 jour');
@@ -80,6 +82,8 @@ it('writes each control back to disk', async () => {
     notif: !defaultSettings.notif,
     notifDet: !defaultSettings.notifDet,
     resumeOnLaunch: !defaultSettings.resumeOnLaunch,
+    preciseDetection: !defaultSettings.preciseDetection,
+    zone: { x: 0.5, y: 0.3, width: 0.5, height: 0.7 },
     sens: 'Haute',
     threshold: 42,
     retention: '1 jour',
@@ -169,5 +173,116 @@ describe('the confidence threshold', () => {
     });
     expect(handle.state.events).toHaveLength(0);
     expect(handle.state.det).toBe('Personne');
+  });
+});
+
+/**
+ * The detection zone, end to end. Its third leg is the one that matters most:
+ * a stored zone is invisible once monitoring starts, and a zone that lets
+ * nothing through looks exactly like an empty room.
+ */
+describe('the detection zone', () => {
+  // Feet at x = 0.4 for the street, x = 0.8 for the garden; the zone is the
+  // right-hand half.
+  const at = (x: number): FrameDetection =>
+    ({ kind: 'Personne', confidence: 0.9, box: { x: x - 0.1, y: 0.55, width: 0.2, height: 0.4 } });
+  const GARDEN = { x: 0.5, y: 0.3, width: 0.5, height: 0.7 };
+
+  const seeTwice = async (handle: Awaited<ReturnType<typeof mountProvider>>, x: number) => {
+    await ReactTestRenderer.act(async () => {
+      handle.state.reportDetections([at(x)], 9 / 16);
+      handle.state.reportDetections([at(x + 0.01)], 9 / 16);
+    });
+  };
+
+  it('records a subject inside it', async () => {
+    const handle = await mountProvider();
+    await ReactTestRenderer.act(async () => { handle.state.saveZone(GARDEN); });
+    await seeTwice(handle, 0.8);
+    expect(handle.state.det).toBe('Personne');
+  });
+
+  it('ignores a subject outside it', async () => {
+    const handle = await mountProvider();
+    await ReactTestRenderer.act(async () => { handle.state.saveZone(GARDEN); });
+    await seeTwice(handle, 0.2);
+    expect(handle.state.det).toBeNull();
+  });
+
+  it('watches the whole frame again once it is cleared', async () => {
+    const handle = await mountProvider();
+    await ReactTestRenderer.act(async () => { handle.state.saveZone(GARDEN); });
+    await seeTwice(handle, 0.2);
+    expect(handle.state.det).toBeNull();
+
+    await ReactTestRenderer.act(async () => { handle.state.saveZone(null); });
+    await seeTwice(handle, 0.2);
+    expect(handle.state.det).toBe('Personne');
+  });
+
+  it('sees nothing at all while the zone is being drawn', async () => {
+    // The camera runs for the editor — it is the picture being drawn on — and
+    // tracking what it sees would open a session, and a recording, behind a
+    // screen whose buttons say "Annuler".
+    const handle = await mountProvider();
+    await ReactTestRenderer.act(async () => { handle.state.beginZoneEdit(); });
+    expect(handle.state.zoneEditing).toBe(true);
+
+    await seeTwice(handle, 0.8);
+    expect(handle.state.det).toBeNull();
+
+    await ReactTestRenderer.act(async () => { handle.state.cancelZoneEdit(); });
+    await seeTwice(handle, 0.8);
+    expect(handle.state.det).toBe('Personne');
+  });
+
+  it('opens the camera tab to draw on, and abandons the drawing on leaving it', async () => {
+    const handle = await mountProvider();
+    await ReactTestRenderer.act(async () => { handle.state.setTab('setup'); });
+    await ReactTestRenderer.act(async () => { handle.state.beginZoneEdit(); });
+    expect(handle.state.tab).toBe('cam');
+
+    await ReactTestRenderer.act(async () => { handle.state.setTab('hist'); });
+    expect(handle.state.zoneEditing).toBe(false);
+  });
+});
+
+/**
+ * "Sensibilité" sets three things, and only one of them — the analysis rate —
+ * lives in the frame processor. The other two reach the tracker through
+ * `reportDetections`, which is what this checks: the profile is read live,
+ * from the ref, on the frame path.
+ */
+describe('sensitivity beyond the frame rate', () => {
+  const strong = (x: number): FrameDetection =>
+    ({ kind: 'Personne', confidence: 0.95, box: { x, y: 0.3, width: 0.2, height: 0.5 } });
+
+  it('records on the very first look at the lowest rate', async () => {
+    // At 1 fps, waiting for a second look is waiting a second — the start of
+    // every passage, every time.
+    const handle = await mountProvider();
+    await ReactTestRenderer.act(async () => { handle.state.setSensitivity('Basse'); });
+    await ReactTestRenderer.act(async () => { handle.state.reportDetections([strong(0.3)], 9 / 16); });
+    expect(handle.state.det).toBe('Personne');
+  });
+
+  it('still wants a second look at the default rate', async () => {
+    const handle = await mountProvider();
+    await ReactTestRenderer.act(async () => { handle.state.reportDetections([strong(0.3)], 9 / 16); });
+    expect(handle.state.det).toBeNull();
+
+    await ReactTestRenderer.act(async () => { handle.state.reportDetections([strong(0.31)], 9 / 16); });
+    expect(handle.state.det).toBe('Personne');
+  });
+
+  it('asks a weaker look to clear a higher bar at the lowest rate', async () => {
+    // The trade: one look instead of two, paid for with a score. A detection
+    // over the slider's 60 % but under the profile's bar opens nothing.
+    const handle = await mountProvider();
+    await ReactTestRenderer.act(async () => { handle.state.setSensitivity('Basse'); });
+    const middling: FrameDetection =
+      { kind: 'Personne', confidence: 0.65, box: { x: 0.3, y: 0.3, width: 0.2, height: 0.5 } };
+    await ReactTestRenderer.act(async () => { handle.state.reportDetections([middling], 9 / 16); });
+    expect(handle.state.det).toBeNull();
   });
 });

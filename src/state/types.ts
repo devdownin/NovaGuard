@@ -1,5 +1,21 @@
 export type Tab = 'cam' | 'hist' | 'setup';
 
+/**
+ * The part of the frame the camera actually watches, normalized 0–1 in
+ * upright-frame space.
+ *
+ * Structurally the same as `DetectionBox`, and declared here rather than
+ * imported because `ml/types.ts` already imports `DetectionKind` from this
+ * file — the two must not depend on each other. Structural typing means the
+ * geometry helpers take either.
+ */
+export interface DetectionZone {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export type DetectionKind = 'Personne' | 'Animal';
 
 export type HistoryFilter = 'Toutes' | 'Personnes' | 'Animaux';
@@ -104,6 +120,25 @@ export interface Settings {
    * returns nothing is indistinguishable from an empty room.
    */
   forceCpu: boolean;
+  /**
+   * Run the larger detector (EfficientDet-Lite2, 448 px) instead of the
+   * default 320 px one.
+   *
+   * A real trade, not a "better" switch: roughly three times the inference cost
+   * for a model that is markedly better at small subjects — which on a
+   * surveillance camera is most of them. Opt-in because the cost lands on
+   * whatever phone is doing the watching, and a device that cannot keep up
+   * analyses fewer frames instead of saying so.
+   */
+  preciseDetection: boolean;
+  /**
+   * Where the camera watches, or `null` for the whole frame.
+   *
+   * The one filter that cuts false positives a threshold cannot: a phone on a
+   * windowsill sees the street as well as the garden, and every passer-by is a
+   * correct detection of somebody nobody asked about.
+   */
+  zone: DetectionZone | null;
   post: PostRoll;
   max: MaxDuration;
   quality: Quality;

@@ -137,6 +137,41 @@ export function uprightBoxToViewBox(
   };
 }
 
+/**
+ * The inverse of {@link uprightBoxToViewBox}: a box the user drew on the
+ * viewfinder, expressed against the frame the detector sees.
+ *
+ * The detection zone is stored in upright-frame space and nowhere else. Storing
+ * what was drawn — view space — would tie it to the viewfinder's size and to
+ * whatever the preview transform happened to be doing at the time, so the same
+ * zone would mean a different part of the room after a rotation. Both are
+ * avoided by converting once, on the way in.
+ */
+export function viewBoxToUprightBox(
+  box: DetectionBox,
+  frameAspect: number,
+  viewW: number,
+  viewH: number,
+): DetectionBox {
+  if (viewW <= 0 || viewH <= 0 || frameAspect <= 0) return box;
+  const ratio = frameAspect / (viewW / viewH);
+
+  if (ratio > 1) {
+    return {
+      x: (box.x - 0.5) / ratio + 0.5,
+      y: box.y,
+      width: box.width / ratio,
+      height: box.height,
+    };
+  }
+  return {
+    x: box.x,
+    y: (box.y - 0.5) * ratio + 0.5,
+    width: box.width,
+    height: box.height * ratio,
+  };
+}
+
 /** Grows a box by `ratio` of its size on every side, clamped to 0–1. */
 export function padBox(box: DetectionBox, ratio: number): DetectionBox {
   const dx = box.width * ratio;
