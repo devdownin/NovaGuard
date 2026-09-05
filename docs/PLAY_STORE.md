@@ -42,7 +42,7 @@ d'installations, si.
 | Construction de l'AAB | ✅ `scripts/build-aab.sh` + job `build-aab` sur tag |
 | `versionName` unique, depuis `package.json` | ✅ |
 | `versionCode` pilotable par la CI | ✅ `-PnovaguardVersionCode=` (numéro de run) |
-| Politique de confidentialité | ✅ [`PRIVACY.md`](../PRIVACY.md) — reste à publier à une URL, et à traduire |
+| Politique de confidentialité, fr + en | ✅ [`PRIVACY.md`](../PRIVACY.md), [`PRIVACY.en.md`](../PRIVACY.en.md) — restent à publier à une URL |
 | Icône 512×512 | ✅ `assets/store/icon-512.png` |
 | Permissions justifiables une par une | ✅ vérifié par `__tests__/playRelease.test.ts` |
 | Absence de permission réseau | ✅ vérifiée par le même test |
@@ -289,12 +289,15 @@ regulated by law.
 
 ### Le reste de la fiche, commun aux deux langues
 
-**URL de la politique de confidentialité** — [`PRIVACY.md`](../PRIVACY.md) doit
-être servi à une adresse publique et stable. Le plus simple sans infrastructure :
-activer GitHub Pages sur le dépôt, ou pointer sur la vue GitHub du fichier.
-**Elle n'existe qu'en français** : Play n'en exige qu'une, mais une fiche
-anglaise renvoyant vers un texte français est ce qu'un examinateur lira. À
-traduire avant de publier la fiche `en-US`.
+**URL de la politique de confidentialité** — une par langue :
+[`PRIVACY.md`](../PRIVACY.md) pour `fr-FR`, [`PRIVACY.en.md`](../PRIVACY.en.md)
+pour `en-US`. Les deux doivent être servies à une adresse publique et stable ; le
+plus simple sans infrastructure est d'activer GitHub Pages sur le dépôt, ou de
+pointer sur la vue GitHub du fichier. Les deux versions se répondent (lien
+croisé en tête) et `playRelease.test.ts` refuse qu'elles divergent en structure
+ou en date — une politique qui ne décrit plus l'application est pire qu'une
+absence de traduction : c'est une affirmation fausse sur ce qu'il advient de la
+vidéo de quelqu'un.
 
 **Catégorie** : Outils / Tools. **Étiquettes** : sécurité, caméra, surveillance.
 **Coordonnées** : e-mail de contact obligatoire et affiché publiquement sur la
@@ -305,11 +308,12 @@ servir aux deux fiches, mais elles montreront l'interface dans la langue de
 l'appareil qui les a produites — donc deux jeux, ou un jeu neutre, à décider en
 même temps que les captures elles-mêmes (§ 6).
 
-**Ce qui n'est pas traduit, et pourquoi** : les textes anglais ci-dessus, comme
-le catalogue `src/i18n/en.ts`, n'ont pas été relus par un anglophone natif. Ils
-sont écrits avec soin et tiennent dans les limites de Play, mais une relecture
-reste à faire — une faute sur la fiche est la première chose que voit un
-visiteur du Store.
+**Ce qui reste à relire** : les textes anglais ci-dessus, la politique de
+confidentialité anglaise et le catalogue `src/i18n/en.ts` n'ont pas été relus par
+un anglophone natif. Ils sont écrits avec soin et tiennent dans les limites de
+Play, mais une relecture reste à faire — une faute sur la fiche est la première
+chose que voit un visiteur du Store, et la politique est le seul document qu'un
+examinateur lit en entier.
 
 ---
 
