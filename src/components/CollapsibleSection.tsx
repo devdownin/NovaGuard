@@ -26,7 +26,7 @@ export function CollapsibleSection({ title, expanded, onToggle, children }: Coll
     <View style={styles.card}>
       <Pressable
         onPress={handleToggle}
-        style={styles.header}
+        style={({ pressed }) => [styles.header, pressed && { opacity: 0.62 }]}
         accessibilityRole="button"
         accessibilityState={{ expanded }}
       >

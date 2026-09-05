@@ -24,10 +24,22 @@ export function ConfirmDialog({
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.body}>{body}</Text>
           <View style={styles.actions}>
-            <Pressable onPress={onCancel} style={styles.cancelBtn}>
+            {/* Both had neither a role nor a pressed state: announced to
+                TalkBack as text, so the "next control" gesture never reached
+                them — on the dialog that stands between the user and a
+                deletion. */}
+            <Pressable
+              onPress={onCancel}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.cancelBtn, pressed && { opacity: 0.62 }]}
+            >
               <Text style={styles.cancelText}>{cancelLabel}</Text>
             </Pressable>
-            <Pressable onPress={onConfirm} style={styles.confirmBtn}>
+            <Pressable
+              onPress={onConfirm}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.confirmBtn, pressed && { opacity: 0.62 }]}
+            >
               <Text style={styles.confirmText}>{confirmLabel}</Text>
             </Pressable>
           </View>

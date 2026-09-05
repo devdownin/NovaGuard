@@ -132,6 +132,9 @@ describe('what the store listing promises', () => {
       'FOREGROUND_SERVICE_MICROPHONE',
       'POST_NOTIFICATIONS',
       'RECORD_AUDIO',
+      // The single tick that confirms surveillance started — a normal
+      // permission, granted at install, with no privacy question to answer.
+      'VIBRATE',
     ].sort());
   });
 

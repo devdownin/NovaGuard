@@ -44,7 +44,10 @@ export function TabBar() {
           <Pressable
             key={key}
             onPress={() => setTab(key)}
-            style={landscape ? styles.railItem : styles.item}
+            style={({ pressed }) => [
+              landscape ? styles.railItem : styles.item,
+              pressed && styles.itemPressed,
+            ]}
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
           >
@@ -62,6 +65,10 @@ export function TabBar() {
 }
 
 const styles = StyleSheet.create({
+  // Android's ripple does not reach a `Pressable` styled like this one, so the
+  // feedback has to be drawn: without it a tab that is already selected reads
+  // as a tap that did nothing.
+  itemPressed: { opacity: 0.6 },
   bar: {
     backgroundColor: 'rgba(22,24,38,0.94)',
   },

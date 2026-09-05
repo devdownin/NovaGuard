@@ -96,6 +96,22 @@ export function shareRecording(path: string): boolean {
   }
 }
 
+/**
+ * A still decoded from a clip already on disk, or null.
+ *
+ * Asked for only when the snapshot taken as the clip opened came back empty —
+ * the screen-off case. Null is an ordinary answer here, not an error: a clip
+ * whose frames will not decode, and every build with no native side at all.
+ */
+export async function extractThumbnail(clipPath: string): Promise<string | null> {
+  if (!NativeSurveillanceService) return null;
+  try {
+    return (await NativeSurveillanceService.extractThumbnail(clipPath)) || null;
+  } catch {
+    return null;
+  }
+}
+
 /** Android owns sound and vibration per channel; this is where the user sets them. */
 export function openDetectionChannelSettings(): void {
   if (!NativeSurveillanceService) return;

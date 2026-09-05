@@ -23,7 +23,7 @@ export function PeriodDropdown({ value, open, onToggle, onSelect }: PeriodDropdo
         accessibilityState={{ expanded: open }}
         accessibilityLabel={t('a11y.period', { value: tValue(`value.period.${value}`) })}
         hitSlop={TOUCH_SLOP}
-        style={styles.trigger}
+        style={({ pressed }) => [styles.trigger, pressed && { opacity: 0.62 }]}
       >
         <Text style={styles.triggerLabel}>{tValue(`value.period.${value}`)}</Text>
         <ChevronDownIcon size={9} color={color.neutral300} />
@@ -36,7 +36,7 @@ export function PeriodDropdown({ value, open, onToggle, onSelect }: PeriodDropdo
               onPress={() => onSelect(opt)}
               accessibilityRole="menuitem"
               accessibilityState={{ selected: opt === value }}
-              style={styles.menuItem}
+              style={({ pressed }) => [styles.menuItem, pressed && { opacity: 0.62 }]}
             >
               <Text style={styles.menuLabel}>{tValue(`value.period.${opt}`)}</Text>
               {opt === value && <Text style={styles.menuCheck}>✓</Text>}

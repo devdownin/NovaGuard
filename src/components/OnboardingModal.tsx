@@ -101,8 +101,9 @@ export function OnboardingModal() {
                         // nothing about which permission each one grants.
                         accessibilityLabel={t('a11y.allow', { name: row.label })}
                         accessibilityState={{ disabled }}
-                        style={[
+                        style={({ pressed }) => [
                           styles.permButton,
+                          pressed && !disabled && { opacity: 0.62 },
                           {
                             borderColor: granted ? color.accent700 : row.enabled ? color.accent : color.neutral800,
                           },

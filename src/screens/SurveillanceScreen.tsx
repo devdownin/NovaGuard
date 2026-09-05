@@ -51,11 +51,16 @@ export function SurveillanceScreen() {
       onPress={toggleMonitoring}
       accessibilityRole="button"
       accessibilityState={{ selected: monitoring }}
-      style={[
+      // A press has to register before the state changes. This is the button
+      // the whole app is for, and it was the only one in the file with no
+      // pressed state at all — `OutlineButton` has had one all along.
+      style={({ pressed }) => [
         styles.cta,
         {
           backgroundColor: monitoring ? 'transparent' : color.accent900,
           borderColor: monitoring ? color.neutral700 : color.accent,
+          opacity: pressed ? 0.72 : 1,
+          transform: [{ scale: pressed ? 0.985 : 1 }],
         },
       ]}
     >

@@ -42,10 +42,14 @@ export function ValueButton({
       accessibilityState={{ selected: !!active }}
       // ~28 dp tall by design; the finger gets the 48 dp Android asks for.
       hitSlop={TOUCH_SLOP}
-      style={[
+      style={({ pressed }) => [
         styles.valueButton,
         pill && { borderRadius: 999, paddingVertical: 6, paddingHorizontal: 11 },
         active && { backgroundColor: color.accent900, borderColor: color.accent },
+        // These cycle through their values on tap, so several presses in a row
+        // are normal — and a value that happens to look similar to the last one
+        // makes a press that did work look like one that did not.
+        pressed && { opacity: 0.62 },
       ]}
     >
       <Text style={[styles.valueButtonText, active && { color: color.accent200 }]}>{label}</Text>

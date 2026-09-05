@@ -70,7 +70,7 @@ export function VideoDetailSheet() {
               />
             ) : hasClip ? (
               <Pressable
-                style={styles.playButton}
+                style={({ pressed }) => [styles.playButton, pressed && { opacity: 0.62 }]}
                 onPress={() => setPlaying(true)}
                 accessibilityRole="button"
                 accessibilityLabel={t('detail.play')}

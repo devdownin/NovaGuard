@@ -19,7 +19,7 @@ export function EventCard({ event, onPress }: { event: DetectionEvent; onPress: 
       accessible
       accessibilityRole="button"
       accessibilityLabel={t('a11y.event', { title, when: formatWhen(event.timestamp) })}
-      style={styles.card}
+      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
     >
       <View style={styles.thumb}>
         <ClipThumbnail
@@ -53,6 +53,9 @@ const styles = StyleSheet.create({
     padding: 9,
     borderRadius: 11,
     backgroundColor: color.surface,
+  },
+  cardPressed: {
+    backgroundColor: color.neutral900,
   },
   thumb: {
     width: 74,
