@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { color, font } from '../theme';
+import { color, font, MAX_FONT_SCALE } from '../theme';
 import { useAppState } from '../state/AppStateContext';
 import { formatBytes } from '../recording/library';
 import { useLandscape } from '../utils/useLandscape';
@@ -48,6 +48,8 @@ export function SurveillanceScreen() {
   const cta = (
     <Pressable
       onPress={toggleMonitoring}
+      accessibilityRole="button"
+      accessibilityState={{ selected: monitoring }}
       style={[
         styles.cta,
         {
@@ -109,8 +111,13 @@ export function SurveillanceScreen() {
 function StatCell({ label, value, landscape }: { label: string; value: string | number; landscape: boolean }) {
   return (
     <View style={[styles.statCell, landscape && styles.statCellRow]}>
-      <Text style={styles.statLabel}>{label}</Text>
-      <Text style={[styles.statValue, landscape && styles.statValueInline]}>{value}</Text>
+      <Text style={styles.statLabel} maxFontSizeMultiplier={MAX_FONT_SCALE}>{label}</Text>
+      <Text
+        style={[styles.statValue, landscape && styles.statValueInline]}
+        maxFontSizeMultiplier={MAX_FONT_SCALE}
+      >
+        {value}
+      </Text>
     </View>
   );
 }

@@ -59,34 +59,38 @@ export function SetupScreen() {
 
         <CollapsibleSection title={t('setup.section.surv')} expanded={settings.exp.surv} onToggle={() => s.toggleSection('surv')}>
           <SettingRow label={t('setup.camera')}>
-            <ValueButton label={settings.camera} onPress={s.cycleCamera} />
+            <ValueButton
+              label={tValue(`value.camera.${settings.camera}`)}
+              onPress={s.cycleCamera}
+              accessibilityLabel={t('a11y.setting', { name: t('setup.camera'), value: tValue(`value.camera.${settings.camera}`) })}
+            />
           </SettingRow>
           <SettingRow
             label={t('setup.resume')}
             subtitle={t('setup.resume.sub')}
           >
-            <Switch value={settings.resumeOnLaunch} onValueChange={s.toggleResumeOnLaunch} />
+            <Switch value={settings.resumeOnLaunch} onValueChange={s.toggleResumeOnLaunch} accessibilityLabel={t('setup.resume')} />
           </SettingRow>
           <SettingRow label={t('setup.night')} subtitle={t('setup.night.sub')}>
-            <Switch value={settings.night} onValueChange={s.toggleNight} />
+            <Switch value={settings.night} onValueChange={s.toggleNight} accessibilityLabel={t('setup.night')} />
           </SettingRow>
         </CollapsibleSection>
 
         <CollapsibleSection title={t('setup.section.det')} expanded={settings.exp.det} onToggle={() => s.toggleSection('det')}>
           <SettingRow label={t('setup.person')}>
-            <Switch value={settings.person} onValueChange={s.togglePerson} />
+            <Switch value={settings.person} onValueChange={s.togglePerson} accessibilityLabel={t('setup.person')} />
           </SettingRow>
           <SettingRow label={t('setup.animal')}>
-            <Switch value={settings.animal} onValueChange={s.toggleAnimal} />
+            <Switch value={settings.animal} onValueChange={s.toggleAnimal} accessibilityLabel={t('setup.animal')} />
           </SettingRow>
           <SettingRow label={t('setup.autoZoom')} subtitle={t('setup.autoZoom.sub')}>
-            <Switch value={settings.autoZoom} onValueChange={s.toggleAutoZoom} />
+            <Switch value={settings.autoZoom} onValueChange={s.toggleAutoZoom} accessibilityLabel={t('setup.autoZoom')} />
           </SettingRow>
           <SettingRow
             label={t('setup.forceCpu')}
             subtitle={t('setup.forceCpu.sub')}
           >
-            <Switch value={settings.forceCpu} onValueChange={s.toggleForceCpu} />
+            <Switch value={settings.forceCpu} onValueChange={s.toggleForceCpu} accessibilityLabel={t('setup.forceCpu')} />
           </SettingRow>
           <View style={styles.subBlock}>
             <Text style={styles.subLabel}>{t('setup.sens')}</Text>
@@ -108,6 +112,9 @@ export function SetupScreen() {
               <Text style={styles.thresholdValue}>{t('detail.percent', { value: settings.threshold })}</Text>
             </View>
             <Slider
+              accessibilityRole="adjustable"
+              accessibilityLabel={t('setup.threshold')}
+              accessibilityValue={{ min: 50, max: 95, now: settings.threshold }}
               minimumValue={50}
               maximumValue={95}
               step={5}
@@ -122,19 +129,31 @@ export function SetupScreen() {
 
         <CollapsibleSection title={t('setup.section.rec')} expanded={settings.exp.rec} onToggle={() => s.toggleSection('rec')}>
           <SettingRow label={t('setup.post')}>
-            <ValueButton label={settings.post} onPress={s.cyclePost} />
+            <ValueButton
+              label={settings.post}
+              onPress={s.cyclePost}
+              accessibilityLabel={t('a11y.setting', { name: t('setup.post'), value: settings.post })}
+            />
           </SettingRow>
           <SettingRow
             label={t('setup.max')}
             subtitle={t('setup.max.sub')}
           >
-            <ValueButton label={settings.max} onPress={s.cycleMax} />
+            <ValueButton
+              label={settings.max}
+              onPress={s.cycleMax}
+              accessibilityLabel={t('a11y.setting', { name: t('setup.max'), value: settings.max })}
+            />
           </SettingRow>
           <SettingRow
             label={t('setup.quality')}
             subtitle={settings.quality === '4K' ? t('setup.quality.sub4k') : undefined}
           >
-            <ValueButton label={settings.quality} onPress={s.cycleQuality} />
+            <ValueButton
+              label={settings.quality}
+              onPress={s.cycleQuality}
+              accessibilityLabel={t('a11y.setting', { name: t('setup.quality'), value: settings.quality })}
+            />
           </SettingRow>
         </CollapsibleSection>
 
@@ -169,6 +188,10 @@ export function SetupScreen() {
                     key={opt}
                     label={tValue(`value.retention.${opt}`)}
                     onPress={() => s.setRetention(opt)}
+                    accessibilityLabel={t('a11y.setting', {
+                      name: t('setup.retention'),
+                      value: tValue(`value.retention.${opt}`),
+                    })}
                     active={on}
                     pill
                   />
@@ -178,7 +201,7 @@ export function SetupScreen() {
           </View>
 
           <SettingRow label={t('setup.autoDel')} subtitle={t('setup.autoDel.sub')}>
-            <Switch value={settings.autoDel} onValueChange={s.toggleAutoDel} />
+            <Switch value={settings.autoDel} onValueChange={s.toggleAutoDel} accessibilityLabel={t('setup.autoDel')} />
           </SettingRow>
 
           <SecondaryOutlineButton label={t('setup.wipe')} onPress={s.wipeAllVideos} style={{ marginTop: 10 }} />
@@ -186,10 +209,10 @@ export function SetupScreen() {
 
         <CollapsibleSection title={t('setup.section.not')} expanded={settings.exp.not} onToggle={() => s.toggleSection('not')}>
           <SettingRow label={t('setup.notif')}>
-            <Switch value={settings.notif} onValueChange={s.toggleNotif} />
+            <Switch value={settings.notif} onValueChange={s.toggleNotif} accessibilityLabel={t('setup.notif')} />
           </SettingRow>
           <SettingRow label={t('setup.notifDet')}>
-            <Switch value={settings.notifDet} onValueChange={s.toggleNotifDet} />
+            <Switch value={settings.notifDet} onValueChange={s.toggleNotifDet} accessibilityLabel={t('setup.notifDet')} />
           </SettingRow>
           <SecondaryOutlineButton
             label={t('setup.sound')}

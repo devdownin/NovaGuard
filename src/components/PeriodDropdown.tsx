@@ -1,9 +1,9 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { color, font, shadow } from '../theme';
+import { color, font, shadow, TOUCH_SLOP } from '../theme';
 import { Period } from '../state/types';
 import { ChevronDownIcon } from './icons';
-import { tValue } from '../i18n';
+import { t, tValue } from '../i18n';
 
 const OPTIONS: Period[] = ["Aujourd'hui", '7 jours', '30 jours', 'Tout'];
 
@@ -17,14 +17,27 @@ interface PeriodDropdownProps {
 export function PeriodDropdown({ value, open, onToggle, onSelect }: PeriodDropdownProps) {
   return (
     <View style={styles.wrap}>
-      <Pressable onPress={onToggle} style={styles.trigger}>
+      <Pressable
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={t('a11y.period', { value: tValue(`value.period.${value}`) })}
+        hitSlop={TOUCH_SLOP}
+        style={styles.trigger}
+      >
         <Text style={styles.triggerLabel}>{tValue(`value.period.${value}`)}</Text>
         <ChevronDownIcon size={9} color={color.neutral300} />
       </Pressable>
       {open && (
         <View style={styles.menu}>
           {OPTIONS.map(opt => (
-            <Pressable key={opt} onPress={() => onSelect(opt)} style={styles.menuItem}>
+            <Pressable
+              key={opt}
+              onPress={() => onSelect(opt)}
+              accessibilityRole="menuitem"
+              accessibilityState={{ selected: opt === value }}
+              style={styles.menuItem}
+            >
               <Text style={styles.menuLabel}>{tValue(`value.period.${opt}`)}</Text>
               {opt === value && <Text style={styles.menuCheck}>✓</Text>}
             </Pressable>

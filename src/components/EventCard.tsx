@@ -12,7 +12,15 @@ export function EventCard({ event, onPress }: { event: DetectionEvent; onPress: 
   const durLabel = formatDuration(event.dur);
 
   return (
-    <Pressable onPress={onPress} style={styles.card}>
+    <Pressable
+      onPress={onPress}
+      // One announcement for the card, not four fragments: `accessible` groups
+      // the thumbnail, the title, the time and the meta line into one target.
+      accessible
+      accessibilityRole="button"
+      accessibilityLabel={t('a11y.event', { title, when: formatWhen(event.timestamp) })}
+      style={styles.card}
+    >
       <View style={styles.thumb}>
         <LinearGradient colors={['#252838', '#14161f']} start={{ x: 0.15, y: 0 }} end={{ x: 0.85, y: 1 }} style={StyleSheet.absoluteFill} />
         <View style={styles.thumbFrame} />

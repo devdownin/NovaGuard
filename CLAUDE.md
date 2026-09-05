@@ -225,6 +225,36 @@ composant. `__tests__/landscape.test.tsx` tourne un vrai `<App />` dans une
 fenêtre couchée et le fait pivoter en cours de route, parce que c'est le seul
 scénario où les trois abonnés répondent en même temps.
 
+**L'interface est traduite ; les identifiants ne le sont pas.** `src/i18n`
+porte deux catalogues, `fr.ts` (la source) et `en.ts` (typé
+`Record<StringKey, string>`, donc une clé oubliée ne compile pas). La langue est
+lue une fois, depuis `I18nManager` : `locale` n'est pas dans les `configChanges`
+de l'activité, donc Android recrée le processus quand elle change — un abonnement
+ne se déclencherait jamais. Trois choses ne doivent pas être reperdues : les
+unions de `state/types.ts` (`'Personne'`, `'Basse'`, `'7 jours'`) sont des
+identifiants **écrits sur disque et comparés par le tracker**, jamais traduits —
+seul leur affichage l'est, par `tValue`, dont la clé est vérifiée à la
+compilation ; le séparateur décimal et les unités Ko/Mo/Go font partie du
+catalogue, parce que « 1,5 Go » et « 1.5 GB » ne sont pas le même nombre pour
+leurs lecteurs ; et les trois préfixes d'erreur (`error.prefix.*`) sont ceux sur
+lesquels `CAMERA_OWNED_ERROR` filtre pour décider quelles bannières le chemin
+caméra a le droit d'effacer — traduire un message sans son préfixe laisse une
+erreur figée dans le viseur, en silence. `__tests__/i18n.test.ts` tient les
+placeholders, les traductions oubliées et cet accord préfixe/message ; la suite
+tourne sur un appareil français (`testing/frenchDevice.js`), fixé comme
+`jest.config` fixe déjà le fuseau et par le même chemin que sur un vrai appareil.
+
+**Un contrôle sans rôle n'existe pas pour un lecteur d'écran.** Il est annoncé
+comme du texte, donc le geste « contrôle suivant » ne l'atteint jamais — le
+bouton principal de l'application était dans ce cas. Un libellé qui ne tient pas
+debout seul (« Autoriser » trois fois, « 7 jours » sans son réglage) en demande
+un explicite. Et la taille de texte se **plafonne** (`MAX_FONT_SCALE`) là où une
+ligne est partagée, jamais ne s'interdit : `allowFontScaling={false}` est
+l'anti-patron, et `__tests__/accessibility.test.tsx` vérifie qu'il n'est nulle
+part — en inspectant les nœuds **hôtes** porteurs d'un responder, c'est-à-dire ce
+qu'Android donne réellement à TalkBack, et pas les composants qui reçoivent une
+prop `onPress`.
+
 **Une nouvelle référence de tableau est un re-rendu.** `confirmedTracksIfChanged`
 existe pour ça : conserver l'identité quand l'incrustation ne changerait pas.
 

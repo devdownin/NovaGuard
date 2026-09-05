@@ -39,6 +39,8 @@ describe('the two catalogues', () => {
     // are listed rather than pattern-matched, so a new one is a decision.
     const identical = keys.filter(key => fr[key] === en[key]);
     expect(identical.sort()).toEqual([
+      // Punctuation only — there is nothing to translate.
+      'a11y.event',
       'detail.percent',
       'detail.type',
       'info.perm.mic',

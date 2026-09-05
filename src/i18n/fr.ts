@@ -125,6 +125,13 @@ export const fr = {
   'setup.privacy.perms': 'Permissions',
   'setup.privacy.data': 'Données stockées',
 
+  // ── what a screen reader says, where the visible text is not enough ──
+  'a11y.setting': '{name} : {value}',
+  'a11y.allow': 'Autoriser {name}',
+  'a11y.dismiss': 'Fermer',
+  'a11y.period': 'Période : {value}',
+  'a11y.event': '{title}, {when}',
+
   // ── info sheets ──────────────────────────────────────────────────────
   'info.perms': 'Permissions',
   'info.data': 'Données stockées',

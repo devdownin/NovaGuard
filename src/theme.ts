@@ -79,3 +79,25 @@ export const shadow = {
     elevation: 12,
   },
 } as const;
+
+/**
+ * How far the system font size may stretch this app's dense chrome.
+ *
+ * Not a refusal to scale — `allowFontScaling={false}` is the accessibility
+ * anti-pattern, and body text here scales without a cap. This bounds only the
+ * places where a label shares a fixed row with something else and would push it
+ * off screen at 2×: the tab labels, the viewfinder chips, the counter cells.
+ * Above 1.4× those become unreadable by being clipped rather than by being
+ * small.
+ */
+export const MAX_FONT_SCALE = 1.4;
+
+/**
+ * The extra touch area given to the small controls.
+ *
+ * Android asks for 48 dp; several controls here are ~28 dp tall because the
+ * design is dense. `hitSlop` grows what the finger hits without moving what the
+ * eye sees, which is the whole point — enlarging the boxes themselves would
+ * relayout every screen.
+ */
+export const TOUCH_SLOP = { top: 10, bottom: 10, left: 8, right: 8 };

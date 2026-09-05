@@ -70,7 +70,13 @@ export function InfoSheet() {
             </View>
             {granted
               ? <Text style={styles.value}>{row.value}</Text>
-              : <ValueButton label={t('info.allow')} onPress={() => grantPermission(key!)} />}
+              : (
+                <ValueButton
+                  label={t('info.allow')}
+                  onPress={() => grantPermission(key!)}
+                  accessibilityLabel={t('a11y.allow', { name: row.label })}
+                />
+              )}
           </View>
         );
       })}

@@ -14,6 +14,8 @@ export function PrimaryOutlineButton({ label, onPress, style, disabled }: Button
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!disabled }}
       style={({ pressed }) => [
         styles.base,
         styles.primary,
@@ -32,6 +34,8 @@ export function SecondaryOutlineButton({ label, onPress, style, disabled }: Butt
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!disabled }}
       style={({ pressed }) => [
         styles.base,
         styles.secondary,
@@ -50,6 +54,8 @@ export function TextButton({ label, onPress, style, disabled }: ButtonProps) {
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!disabled }}
       style={({ pressed }) => [styles.base, styles.text_, pressed && { opacity: 0.6 }, style]}
     >
       <Text style={[styles.text, { color: color.neutral500 }]}>{label}</Text>
@@ -62,6 +68,8 @@ export function SolidAccentButton({ label, onPress, style, disabled }: ButtonPro
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!disabled }}
       style={({ pressed }) => [
         styles.solidBase,
         {

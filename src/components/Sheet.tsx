@@ -3,6 +3,7 @@ import {
   Animated, Modal, Pressable, ScrollView, StyleSheet, useWindowDimensions, View,
 } from 'react-native';
 import { color, shadow } from '../theme';
+import { t } from '../i18n';
 
 interface SheetProps {
   visible: boolean;
@@ -46,7 +47,12 @@ export function Sheet({ visible, onClose, maxHeightPercent = 88, children }: She
   return (
     <Modal visible transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
       <Animated.View style={[StyleSheet.absoluteFill, styles.backdrop, { opacity: backdropOpacity }]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel={t('a11y.dismiss')}
+        />
       </Animated.View>
       <Animated.View
         style={[styles.sheet, { maxHeight: `${maxHeightPercent}%`, transform: [{ translateY }] }]}

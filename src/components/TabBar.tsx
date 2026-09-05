@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { color, font } from '../theme';
+import { color, font, MAX_FONT_SCALE } from '../theme';
 import { Tab } from '../state/types';
 import { useAppState } from '../state/AppStateContext';
 import { useLandscape } from '../utils/useLandscape';
@@ -51,7 +51,9 @@ export function TabBar() {
             <View style={[styles.pill, { backgroundColor: active ? color.accent900 : 'transparent' }]}>
               <Icon size={22} color={tint} />
             </View>
-            <Text style={[styles.label, { color: tint }]}>{t(labelKey)}</Text>
+            <Text style={[styles.label, { color: tint }]} maxFontSizeMultiplier={MAX_FONT_SCALE}>
+              {t(labelKey)}
+            </Text>
           </Pressable>
         );
       })}

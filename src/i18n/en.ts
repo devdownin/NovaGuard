@@ -126,6 +126,12 @@ export const en: Record<StringKey, string> = {
   'setup.privacy.data': 'Stored data',
 
   // ── info sheets ──────────────────────────────────────────────────────
+  'a11y.setting': '{name}: {value}',
+  'a11y.allow': 'Allow {name}',
+  'a11y.dismiss': 'Dismiss',
+  'a11y.period': 'Period: {value}',
+  'a11y.event': '{title}, {when}',
+
   'info.perms': 'Permissions',
   'info.data': 'Stored data',
   'info.licenses': 'Third-party licences',
