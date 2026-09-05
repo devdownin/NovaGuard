@@ -13,7 +13,7 @@ const KEYS = {
   settings: '@novaguard:settings',
   events: '@novaguard:events:v2',
   detToday: '@novaguard:detToday:v2',
-  lastDet: '@novaguard:lastDet',
+  lastDetAt: '@novaguard:lastDetAt',
   monitoring: '@novaguard:monitoring',
   onboardingComplete: '@novaguard:onboardingComplete',
   frameStage: '@novaguard:frameStage',
@@ -21,7 +21,10 @@ const KEYS = {
 
 // '@novaguard:perms' held simulated mic/notification grants; all three
 // permissions are real OS state now, so the key has no meaning any more.
-const STALE_KEYS = ['@novaguard:events', '@novaguard:detToday', '@novaguard:perms'];
+// `lastDet` held a bare "14:32", which cannot age: read back two days later it
+// still claimed the detection was at 14:32, with no way to tell which day. The
+// instant is stored now and formatted at render.
+const STALE_KEYS = ['@novaguard:events', '@novaguard:detToday', '@novaguard:perms', '@novaguard:lastDet'];
 
 /** Best-effort removal of the superseded keys so they don't sit there forever. */
 export async function dropStaleKeys(): Promise<void> {
@@ -138,8 +141,8 @@ export const storage = {
   loadDetToday: () => readJson<DayCount>(KEYS.detToday),
   saveDetToday: (v: DayCount) => writeJson(KEYS.detToday, v),
 
-  loadLastDet: () => readJson<string>(KEYS.lastDet),
-  saveLastDet: (v: string) => writeJson(KEYS.lastDet, v),
+  loadLastDetAt: () => readJson<number>(KEYS.lastDetAt),
+  saveLastDetAt: (v: number) => writeJson(KEYS.lastDetAt, v),
 
   loadMonitoring: () => readJson<boolean>(KEYS.monitoring),
   saveMonitoring: (v: boolean) => writeJson(KEYS.monitoring, v),

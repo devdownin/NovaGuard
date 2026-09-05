@@ -46,6 +46,21 @@ export function formatWhen(ts: number): string {
   return t('date.other', { day: d.getDate(), month: MONTHS[d.getMonth()], time });
 }
 
+/**
+ * The same three forms without the time: "Aujourd'hui", "Hier", "28 août".
+ *
+ * A day heading has no use for a clock — the clip's own time is on its card —
+ * and stripping it off `formatWhen` would mean a regex over a translated
+ * string, which the next language breaks silently.
+ */
+export function formatDay(ts: number): string {
+  const diff = daysAgo(ts);
+  if (diff === 0) return t('date.dayToday');
+  if (diff === 1) return t('date.dayYesterday');
+  const d = new Date(ts);
+  return t('date.dayOther', { day: d.getDate(), month: MONTHS[d.getMonth()] });
+}
+
 /** "01/09 14:32:07" */
 export function formatClock(d: Date): string {
   return (

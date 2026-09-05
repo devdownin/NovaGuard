@@ -1,10 +1,10 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
 import { color, font } from '../theme';
 import { DetectionEvent } from '../state/types';
 import { formatDuration, formatWhen } from '../utils/date';
 import { ChevronRightIcon } from './icons';
+import { ClipThumbnail } from './ClipThumbnail';
 import { t } from '../i18n';
 
 export function EventCard({ event, onPress }: { event: DetectionEvent; onPress: () => void }) {
@@ -22,8 +22,13 @@ export function EventCard({ event, onPress }: { event: DetectionEvent; onPress: 
       style={styles.card}
     >
       <View style={styles.thumb}>
-        <LinearGradient colors={['#252838', '#14161f']} start={{ x: 0.15, y: 0 }} end={{ x: 0.85, y: 1 }} style={StyleSheet.absoluteFill} />
-        <View style={styles.thumbFrame} />
+        <ClipThumbnail
+          path={event.thumbPath ?? null}
+          colors={['#252838', '#14161f']}
+          start={{ x: 0.15, y: 0 }}
+          end={{ x: 0.85, y: 1 }}
+          placeholder={<View style={styles.thumbFrame} />}
+        />
         <Text style={styles.thumbDur}>{durLabel}</Text>
       </View>
       <View style={styles.info}>
@@ -69,6 +74,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 5,
     bottom: 4,
+    // Legible over a still as well as over the flat placeholder it used to sit on.
+    paddingHorizontal: 3,
+    borderRadius: 3,
+    backgroundColor: 'rgba(0,0,0,0.55)',
     fontFamily: font.regular,
     fontSize: 8.5,
     color: color.neutral400,

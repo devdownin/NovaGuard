@@ -37,4 +37,5 @@ export const defaultSettings: Settings = {
 export const defaultEvents: DetectionEvent[] = [];
 
 export const defaultDetToday = 0;
-export const defaultLastDet = '—';
+/** No detection yet — the screen shows a dash rather than a formatted nothing. */
+export const defaultLastDetAt: number | null = null;

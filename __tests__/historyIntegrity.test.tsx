@@ -118,3 +118,49 @@ describe('a history that read fine', () => {
     expect(mockFs.unlink.mock.calls.map(([path]) => path).sort()).toEqual(CLIPS);
   });
 });
+
+/**
+ * Stills live in the recordings directory next to the clips they belong to, so
+ * they fall under the same sweep. The sweep asks each event which files it
+ * claims — and while an event claimed only its clip, the first launch after a
+ * detection deleted every thumbnail the app had just taken.
+ */
+describe('the stills the sweep has to know about', () => {
+  const CLIP = '/tmp/novaguard-test/recordings/kept.mp4';
+  const STILL = '/tmp/novaguard-test/recordings/kept.jpg';
+  const STRAY = '/tmp/novaguard-test/recordings/stray.jpg';
+
+  beforeEach(() => {
+    mockFs.exists.mockResolvedValue(true);
+    mockFs.readDir.mockResolvedValue(
+      [CLIP, STILL, STRAY].map(path => ({ path, isFile: () => true, isDirectory: () => false })) as never,
+    );
+  });
+
+  it('keeps the still an event points at, and only sweeps the one nothing claims', async () => {
+    await AsyncStorage.setItem(EVENTS_KEY, JSON.stringify([
+      { id: 1, kind: 'Personne', timestamp: Date.now(), dur: 5, conf: 90, path: CLIP, bytes: 1024, thumbPath: STILL },
+    ]));
+
+    await mountProvider();
+    await settle();
+
+    expect(mockFs.unlink).toHaveBeenCalledWith(STRAY);
+    expect(mockFs.unlink).not.toHaveBeenCalledWith(STILL);
+    expect(mockFs.unlink).not.toHaveBeenCalledWith(CLIP);
+  });
+
+  it('sweeps a still whose event was written before thumbnails existed', async () => {
+    // No `thumbPath` at all on disk — the field is newer than the history.
+    // The event still claims its clip, and nothing claims the JPEGs.
+    await AsyncStorage.setItem(EVENTS_KEY, JSON.stringify([
+      { id: 1, kind: 'Personne', timestamp: Date.now(), dur: 5, conf: 90, path: CLIP, bytes: 1024 },
+    ]));
+
+    await mountProvider();
+    await settle();
+
+    expect(mockFs.unlink).toHaveBeenCalledWith(STILL);
+    expect(mockFs.unlink).not.toHaveBeenCalledWith(CLIP);
+  });
+});

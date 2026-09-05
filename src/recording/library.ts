@@ -1,6 +1,6 @@
 import { t } from '../i18n';
 import { DetectionEvent, DetectionKind, MaxDuration, Period, PostRoll, Quality, Retention } from '../state/types';
-import { startOfDayBefore } from '../utils/date';
+import { startOfDay, startOfDayBefore } from '../utils/date';
 
 /**
  * Pure logic behind recording and storage management: how long a clip may run,
@@ -243,6 +243,18 @@ export function nextEventId(latestId: number, now: number): number {
   return Math.max(now, latestId + 1);
 }
 
+/**
+ * Every file the given events own — clips and their stills.
+ *
+ * One place rather than four call sites listing `.path`: an event's files grew
+ * from one to two, and each deletion site that kept saying `.path` would have
+ * gone on leaving a still behind, invisible in the app and reclaimed by nothing
+ * but the launch sweep.
+ */
+export function eventFiles(events: DetectionEvent[]): (string | null)[] {
+  return events.flatMap(e => [e.path, e.thumbPath ?? null]);
+}
+
 export function totalBytes(events: DetectionEvent[]): number {
   return events.reduce((sum, e) => sum + (e.bytes > 0 ? e.bytes : 0), 0);
 }
@@ -309,4 +321,57 @@ export function sameDay(a: number, b: number): boolean {
 export function todayCount(stored: { count: number; day: number } | null, now: number): number {
   if (!stored) return 0;
   return sameDay(stored.day, now) ? stored.count : 0;
+}
+
+/**
+ * One row of the history list: a day heading, or one to `perRow` events.
+ *
+ * Rows rather than a `FlatList` of events, because the list has to do two
+ * things at once that `numColumns` cannot: group by day, and put two cards
+ * side by side in landscape. `numColumns` also refuses to change on a live
+ * list — it needs the list remounted through a `key` — so building the rows
+ * here removes that trap along with the grouping.
+ *
+ * Pure, so the grouping is testable without rendering anything.
+ */
+/**
+ * One line of the history: a day heading, or the cards that fit on a row.
+ *
+ * The grouping is done here rather than by `FlatList` because the two things
+ * the list has to do at once — break on a calendar day, and pack `perRow` cards
+ * per line — cannot both be `numColumns`: a day with three detections would put
+ * the third one beside the first of the day before. Composing rows also drops
+ * the `key`-remount that changing `numColumns` on a live list requires, so a
+ * rotation now re-renders the history instead of rebuilding it.
+ */
+export type HistoryRow =
+  | { kind: 'day'; key: string; day: number }
+  | { kind: 'events'; key: string; events: DetectionEvent[] };
+
+/** `events` newest first, as the history already holds them. */
+export function historyRows(events: DetectionEvent[], perRow: number): HistoryRow[] {
+  const rows: HistoryRow[] = [];
+  let openDay: number | null = null;
+  let pending: DetectionEvent[] = [];
+
+  const flush = () => {
+    if (!pending.length) return;
+    rows.push({ kind: 'events', key: `e${pending[0].id}`, events: pending });
+    pending = [];
+  };
+
+  for (const event of events) {
+    const day = startOfDay(event.timestamp);
+    if (day !== openDay) {
+      flush();
+      // The heading is the day itself; how it is worded — "Aujourd'hui",
+      // "Hier", "28 août" — belongs to the screen, which has the locale.
+      rows.push({ kind: 'day', key: `d${day}`, day });
+      openDay = day;
+    }
+    pending.push(event);
+    if (pending.length === Math.max(1, perRow)) flush();
+  }
+  flush();
+  return rows;
 }

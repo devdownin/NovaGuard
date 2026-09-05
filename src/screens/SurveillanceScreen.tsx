@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { color, font, MAX_FONT_SCALE } from '../theme';
 import { useAppState } from '../state/AppStateContext';
 import { formatBytes } from '../recording/library';
+import { formatWhen } from '../utils/date';
 import { useLandscape } from '../utils/useLandscape';
 import { t } from '../i18n';
 import { Viewfinder } from '../components/Viewfinder';
@@ -18,7 +19,7 @@ import { Viewfinder } from '../components/Viewfinder';
  * the whole height.
  */
 export function SurveillanceScreen() {
-  const { monitoring, toggleMonitoring, lastDet, detToday, storage: store } = useAppState();
+  const { monitoring, toggleMonitoring, lastDetAt, detToday, storage: store } = useAppState();
   const landscape = useLandscape();
 
   const brand = (
@@ -68,7 +69,13 @@ export function SurveillanceScreen() {
   // narrower than the longest label — so they turn into rows there.
   const stats = (
     <View style={[styles.statsRow, landscape && styles.statsColumn]}>
-      <StatCell label={t('surv.stat.last')} value={lastDet} landscape={landscape} />
+      <StatCell
+        label={t('surv.stat.last')}
+        // The instant, not a bare clock time: "14:32" read two days later still
+        // claimed the detection was at 14:32, with nothing to say which day.
+        value={lastDetAt == null ? '—' : formatWhen(lastDetAt)}
+        landscape={landscape}
+      />
       <StatCell label={t('surv.stat.today')} value={detToday} landscape={landscape} />
       <StatCell label={t('surv.stat.space')} value={formatBytes(store.free)} landscape={landscape} />
     </View>

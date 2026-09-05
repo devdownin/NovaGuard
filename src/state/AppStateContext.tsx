@@ -9,11 +9,10 @@ import {
   Retention, Sensitivity, Settings, StorageInfo, Tab, VolumeSpace,
 } from './types';
 import {
-  defaultDetToday, defaultEvents, defaultLastDet, defaultSettings,
+  defaultDetToday, defaultEvents, defaultLastDetAt, defaultSettings,
 } from './defaults';
 import { dropStaleKeys, EMPTY_STORED_SIZE, storage, StoredSize } from './storage';
 import { useForeground } from './useForeground';
-import { pad } from '../utils/date';
 import { useLatest } from '../utils/useLatest';
 import { FrameDetection } from '../ml/types';
 import { confirmedTracksIfChanged, primaryTrack, Track, updateTracks } from '../ml/tracker';
@@ -21,11 +20,11 @@ import { trackerOptionsFor } from '../ml/sensitivity';
 import { detectionsInZone } from '../ml/zone';
 import { Clip, useRecorder } from '../recording/useRecorder';
 import {
-  bytesToReclaim, clipFileName, clipOutcome, eventsToReclaim, expiredEvents, lowSpaceBytes,
+  bytesToReclaim, clipFileName, clipOutcome, eventFiles, eventsToReclaim, expiredEvents, lowSpaceBytes,
   minFreeBytes, nextEventId, periodRange, postRollMs, sameDay, todayCount, totalBytes,
 } from '../recording/library';
 import {
-  deleteFile, deleteFiles, orphanedRecordings, renameRecording, volumeSpace,
+  deleteFiles, orphanedRecordings, renameRecording, volumeSpace,
 } from '../recording/videoStore';
 import {
   dismissDetectionAlert, foregroundServiceError, hasNotificationPermission, notifyDetection,
@@ -54,7 +53,8 @@ interface AppStateValue {
   /** What the current session is recording, or null. Survives the post-roll. */
   det: DetectionKind | null;
   detToday: number;
-  lastDet: string;
+  /** When the last detection was committed, or null. Formatted at render. */
+  lastDetAt: number | null;
   /** True only while a clip is actually being written to disk. */
   recording: boolean;
   /** Last recording failure, surfaced in the viewfinder instead of being swallowed. */
@@ -296,7 +296,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   // its setters through this sink, so a detection never re-renders this body.
   const viewfinder = useRef<ViewfinderSink | null>(null);
   const [detToday, setDetToday] = useState(defaultDetToday);
-  const [lastDet, setLastDet] = useState(defaultLastDet);
+  const [lastDetAt, setLastDetAt] = useState(defaultLastDetAt);
   const [recError, setRecError] = useState<string | null>(null);
   const [volume, setVolume] = useState<VolumeSpace>({ free: 0, total: 0 });
   /**
@@ -360,7 +360,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         storage.loadSettings(),
         storage.loadEvents(),
         storage.loadDetToday(),
-        storage.loadLastDet(),
+        storage.loadLastDetAt(),
         storage.loadMonitoring(),
         storage.loadOnboardingComplete(),
         storage.loadFrameStage(),
@@ -393,7 +393,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         if (diagnosis) setRecError(diagnosis);
       }
       setDetToday(todayCount(dt, Date.now()));
-      if (ld) setLastDet(ld);
+      if (typeof ld === 'number') setLastDetAt(ld);
       setOnb(onboarded ? null : 'intro');
 
       // Surveillance picks up where it left off. Gated on the camera permission
@@ -411,7 +411,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       // Clips left behind by a crash between the encoder closing a file and the
       // event being written would otherwise take up space nothing accounts for.
       if (storedEvents.ok) {
-        const orphans = await orphanedRecordings((ev ?? []).map(e => e.path));
+        // Both paths: the sweep deletes everything in the directory that no
+        // event claims, and a still is in there next to its clip.
+        const orphans = await orphanedRecordings(eventFiles(ev ?? []));
         if (orphans.length) await deleteFiles(orphans);
       }
       await dropStaleKeys();
@@ -429,7 +431,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (hydrated) storage.saveDetToday({ count: detToday, day: Date.now() });
   }, [hydrated, detToday]);
-  useEffect(() => { if (hydrated) storage.saveLastDet(lastDet); }, [hydrated, lastDet]);
+  useEffect(() => { if (hydrated && lastDetAt != null) storage.saveLastDetAt(lastDetAt); }, [hydrated, lastDetAt]);
   /**
    * Remember that surveillance was on — but only once it has proved survivable.
    *
@@ -556,7 +558,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   ) => {
     const now = at;
     setDetToday(v => v + 1);
-    setLastDet(pad(new Date(now).getHours()) + ':' + pad(new Date(now).getMinutes()));
+    setLastDetAt(now);
     // Minted outside the updater: React may invoke an updater twice, and an id
     // that advanced on each invocation would not be the one that got committed.
     const id = nextEventId(lastEventIdRef.current, now);
@@ -572,6 +574,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         conf: c,
         path: clip ? clip.path : null,
         bytes: clip ? clip.bytes : 0,
+        thumbPath: clip ? clip.thumbPath : null,
       },
       ...evs,
     ]);
@@ -631,15 +634,15 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     switch (clipOutcome(meta != null, clip.bytes)) {
       case 'discard':
         // A stop that raced the session ending, or the component going away
-        // mid-clip. Nothing will ever point at this file.
-        deleteFile(clip.path);
+        // mid-clip. Nothing will ever point at these files.
+        deleteFiles([clip.path, clip.thumbPath]);
         return;
 
       case 'event-only':
         // The encoder produced an empty file. Keep the sighting, drop the husk:
         // an unplayable 0-byte row in the history is worse than none.
         if (!pending) clearSession();
-        deleteFile(clip.path);
+        deleteFiles([clip.path, clip.thumbPath]);
         commitEvent(meta!.kind, meta!.dur, meta!.conf, null);
         return;
 
@@ -935,7 +938,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
     let cancelled = false;
     const ids = new Set(expired.map(e => e.id));
-    deleteFiles(expired.map(e => e.path)).then(() => {
+    deleteFiles(eventFiles(expired)).then(() => {
       if (cancelled) return;
       setEvents(evs => evs.filter(e => !ids.has(e.id)));
       refreshVolume();
@@ -961,7 +964,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     const victims = eventsToReclaim(eventsRef.current, needed);
     if (!victims.length) return;
     const ids = new Set(victims.map(e => e.id));
-    await deleteFiles(victims.map(e => e.path));
+    await deleteFiles(eventFiles(victims));
     setEvents(evs => evs.filter(e => !ids.has(e.id)));
     // Re-measure rather than assume: the next sweep must decide against what
     // the volume actually reports, or it would keep reclaiming against a
@@ -992,7 +995,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     [events, selected],
   );
   const doDelete = useCallback(() => {
-    const path = selectedEvent?.path ?? null;
+    const files = selectedEvent ? eventFiles([selectedEvent]) : [];
     setEvents(evs => evs.filter(e => e.id !== selected));
     setSelected(null);
     setConfirmDelete(false);
@@ -1000,13 +1003,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     // to do so while this very unlink was still in flight — so "Espace" kept
     // showing the deleted clip's bytes as taken until the periodic sweep, up to
     // 30 s later. `doWipe` below already did it this way.
-    deleteFile(path).then(sweepDisk);
+    deleteFiles(files).then(sweepDisk);
   }, [selected, selectedEvent, sweepDisk]);
 
   const askWipe = useCallback(() => setConfirmWipe(true), []);
   const cancelWipe = useCallback(() => setConfirmWipe(false), []);
   const doWipe = useCallback(() => {
-    deleteFiles(events.map(e => e.path)).then(sweepDisk);
+    deleteFiles(eventFiles(events)).then(sweepDisk);
     setEvents([]);
     setConfirmWipe(false);
   }, [events, sweepDisk]);
@@ -1152,7 +1155,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AppStateValue>(() => ({
     hydrated,
     tab, setTab,
-    monitoring, det, detToday, lastDet,
+    monitoring, det, detToday, lastDetAt,
     recording: isRecording, recError, clipGap, storage: store, cameraRef, foreground, reportCameraProblem, reportFrameStage,
     toggleMonitoring, reportDetections,
     events, filter, setFilter, period, setPeriod, periodOpen, togglePeriodOpen, selected, selectedEvent, selectEvent,
@@ -1165,7 +1168,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     info, storedSize, openInfo, closeInfo,
     onb, perms, onbNext, onbFinish, grantPermission,
   }), [
-    hydrated, tab, monitoring, det, detToday, lastDet,
+    hydrated, tab, monitoring, det, detToday, lastDetAt,
     isRecording, recError, clipGap, store, cameraRef, foreground, reportCameraProblem, reportFrameStage, toggleMonitoring, reportDetections,
     events, filter, period, periodOpen, togglePeriodOpen, selected, selectedEvent, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete, confirmWipe, askWipe, cancelWipe, doWipe,
