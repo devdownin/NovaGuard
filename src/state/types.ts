@@ -36,6 +36,13 @@ export interface DetectionEvent {
   path: string | null;
   /** Real size on disk in bytes, read back with `stat` after the file closed. */
   bytes: number;
+  /**
+   * The still taken as the clip opened, or `null` when none could be — no
+   * preview to screenshot, or an event with no file at all. Events written
+   * before thumbnails existed read back without the field, so anything showing
+   * one must treat a missing value as `null` rather than trust the type.
+   */
+  thumbPath: string | null;
 }
 
 /** What the volume itself reports. Measured; nothing here is derived. */
@@ -128,6 +135,6 @@ export interface PersistedState {
   settings: Settings;
   events: DetectionEvent[];
   detToday: DayCount;
-  lastDet: string;
+  lastDetAt: number | null;
   onboardingComplete: boolean;
 }

@@ -35,6 +35,8 @@ const appGradle = stripComments(read('android/app/build.gradle'));
 const manifest = read('android/app/src/main/AndroidManifest.xml');
 const gradleProperties = read('android/gradle.properties');
 const gitignore = read('.gitignore');
+const privacyFr = read('PRIVACY.md');
+const privacyEn = read('PRIVACY.en.md');
 
 /** The body of one `buildTypes { … }` sub-block, braces balanced. */
 function buildTypeBlock(name: string): string {
@@ -142,5 +144,50 @@ describe('what the store listing promises', () => {
     for (const type of types) {
       expect(manifest).toContain(`android.permission.FOREGROUND_SERVICE_${type.toUpperCase()}`);
     }
+  });
+});
+
+/**
+ * The privacy policy is a Store listing field, in every language the listing is
+ * published in — and the one document a reviewer reads end to end. Two copies
+ * of it drift the moment one is edited alone, and a policy that no longer
+ * describes the app is worse than no translation at all: it is a false
+ * statement about what happens to someone's video.
+ *
+ * Structure and date, not prose: the two are translations, so the only things
+ * that can be compared are how many sections, rows and bullets each has, and
+ * whether they claim to have been updated on the same day.
+ */
+describe('the privacy policy, in both languages', () => {
+  const sections = (doc: string) => doc.match(/^## .+$/gm) ?? [];
+  const tableRows = (doc: string) => doc.match(/^\| /gm) ?? [];
+  const bullets = (doc: string) => doc.match(/^- /gm) ?? [];
+  const updated = (doc: string) => doc.match(/(\d+) (\w+) (2\d{3})/)?.slice(1);
+
+  it('says the same thing in the same shape', () => {
+    expect(sections(privacyEn)).toHaveLength(sections(privacyFr).length);
+    expect(tableRows(privacyEn)).toHaveLength(tableRows(privacyFr).length);
+    expect(bullets(privacyEn)).toHaveLength(bullets(privacyFr).length);
+  });
+
+  it('carries the same date on both', () => {
+    // A section added to one and not the other shows up above; a section
+    // *rewritten* in one only shows up here, and only if whoever rewrote it
+    // moved the date — which is the habit this is meant to enforce.
+    const [dayFr, , yearFr] = updated(privacyFr)!;
+    const [dayEn, , yearEn] = updated(privacyEn)!;
+    expect([dayEn, yearEn]).toEqual([dayFr, yearFr]);
+  });
+
+  it('points each version at the other', () => {
+    expect(privacyFr).toContain('(PRIVACY.en.md)');
+    expect(privacyEn).toContain('(PRIVACY.md)');
+  });
+
+  it('keeps the claim the Data safety form rests on', () => {
+    // Both say the app cannot open a network connection. The manifest is
+    // checked above; this is the sentence a reviewer reads.
+    expect(privacyFr).toContain('INTERNET');
+    expect(privacyEn).toContain('INTERNET');
   });
 });

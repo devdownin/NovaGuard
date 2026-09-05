@@ -5,6 +5,7 @@ import {
   eventsToReclaim,
   expiredEvents,
   formatBytes,
+  historyRows,
   LOW_SPACE_BYTES,
   MIN_FREE_BYTES,
   minFreeBytes,
@@ -32,7 +33,7 @@ function ev(id: number, daysBack: number, bytes = 10 * MB): DetectionEvent {
   d.setHours(12, 0, 0, 0);
   return {
     id, kind: 'Personne', timestamp: d.getTime(), dur: 12, conf: 90,
-    path: `/clips/${id}.mp4`, bytes,
+    path: `/clips/${id}.mp4`, bytes, thumbPath: `/clips/${id}.jpg`,
   };
 }
 
@@ -181,7 +182,7 @@ describe('eventsToReclaim', () => {
 
   it('skips events with no file, which would free nothing', () => {
     const withFile = ev(1, 1, 10 * MB);
-    const noFile: DetectionEvent = { ...ev(2, 9), path: null, bytes: 0 };
+    const noFile: DetectionEvent = { ...ev(2, 9), path: null, bytes: 0 , thumbPath: null};
     expect(eventsToReclaim([withFile, noFile], 5 * MB).map(e => e.id)).toEqual([1]);
   });
 
@@ -210,7 +211,7 @@ describe('bytesToReclaim', () => {
 
 describe('totalBytes', () => {
   it('sums real sizes and ignores fileless events', () => {
-    const noFile: DetectionEvent = { ...ev(9, 1), path: null, bytes: 0 };
+    const noFile: DetectionEvent = { ...ev(9, 1), path: null, bytes: 0 , thumbPath: null};
     expect(totalBytes([ev(1, 1, 3 * MB), ev(2, 2, 4 * MB), noFile])).toBe(7 * MB);
   });
 });
@@ -330,5 +331,55 @@ describe('periodRange', () => {
   it('maps every period to a day count', () => {
     expect(periodDays("Aujourd'hui")).toBe(0);
     expect(periodDays('Tout')).toBeNull();
+  });
+});
+
+describe('historyRows', () => {
+  const at = (m: number, d: number, h: number): DetectionEvent => ({
+    id: new Date(2026, m - 1, d, h).getTime(),
+    kind: 'Personne',
+    timestamp: new Date(2026, m - 1, d, h).getTime(),
+    dur: 5,
+    conf: 90,
+    path: null,
+    bytes: 0, thumbPath: null
+  });
+
+  const shape = (rows: ReturnType<typeof historyRows>) =>
+    rows.map(r => (r.kind === 'day' ? 'day' : r.events.length));
+
+  it('opens every day with its heading', () => {
+    const rows = historyRows([at(9, 2, 18), at(9, 2, 9), at(9, 1, 20)], 1);
+    expect(shape(rows)).toEqual(['day', 1, 1, 'day', 1]);
+    expect(rows.filter(r => r.kind === 'day')).toHaveLength(2);
+  });
+
+  it('packs the cards of one day and never across two', () => {
+    // The reason this is not `numColumns`: with two columns over a flat list,
+    // the lone detection of 1 September would sit beside one from the 2nd.
+    const rows = historyRows([at(9, 2, 18), at(9, 2, 9), at(9, 1, 20)], 2);
+    expect(shape(rows)).toEqual(['day', 2, 'day', 1]);
+  });
+
+  it('leaves an odd last card of a day on its own row', () => {
+    expect(shape(historyRows([at(9, 2, 18), at(9, 2, 12), at(9, 2, 9)], 2)))
+      .toEqual(['day', 2, 1]);
+  });
+
+  it('groups by calendar day, not by 24-hour blocks', () => {
+    // Two hours apart, either side of midnight: subtracting 86_400_000 would
+    // call them the same day, and so would any comparison on the raw instant.
+    expect(shape(historyRows([at(9, 2, 1), at(9, 1, 23)], 2))).toEqual(['day', 1, 'day', 1]);
+  });
+
+  it('keeps the keys distinct so a row is never reused for another', () => {
+    const keys = historyRows([at(9, 2, 18), at(9, 2, 9), at(9, 1, 20)], 2).map(r => r.key);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('renders nothing for no events, and survives a nonsensical width', () => {
+    expect(historyRows([], 2)).toEqual([]);
+    // A zero would otherwise flush on every push and loop forever on none.
+    expect(shape(historyRows([at(9, 2, 18), at(9, 2, 9)], 0))).toEqual(['day', 1, 1]);
   });
 });

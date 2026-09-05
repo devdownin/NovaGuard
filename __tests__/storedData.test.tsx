@@ -30,7 +30,7 @@ const SETTINGS_KEY = '@novaguard:settings';
 /** Today: an older stamp would be swept by the 30-day retention on hydration. */
 const NOW = Date.now();
 const event = (id: number, path: string | null, bytes: number): DetectionEvent => ({
-  id, kind: 'Personne', timestamp: NOW, dur: 4, conf: 90, path, bytes,
+  id, kind: 'Personne', timestamp: NOW, dur: 4, conf: 90, path, bytes, thumbPath: null,
 });
 
 /** Every line of text the sheet is showing. */

@@ -18,6 +18,7 @@ import { Dimensions, FlatList, ScaledSize, StyleSheet, Text, View } from 'react-
 import ReactTestRenderer from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import App from '../App';
+import { EventCard } from '../src/components/EventCard';
 import { SPLASH_MIN_DURATION_MS } from '../src/components/SplashScreen';
 import { TabBar } from '../src/components/TabBar';
 import { SurveillanceScreen } from '../src/screens/SurveillanceScreen';
@@ -77,8 +78,45 @@ async function openHistory(renderer: ReactTestRenderer.ReactTestRenderer) {
   return renderer.root.findByType(FlatList);
 }
 
+/**
+ * How many cards the widest rendered row holds.
+ *
+ * The history used to say this through `FlatList`'s `numColumns`, which could
+ * be read off an *empty* list — so the assertion held with the history seeded
+ * or not, and said nothing about what a user sees. Rows are composed here
+ * instead, so the count only exists once there are cards to count: the two
+ * cards of a landscape row share a parent, the one card of a portrait row does
+ * not share it with anyone.
+ */
+function widestRow(renderer: ReactTestRenderer.ReactTestRenderer): number {
+  const rows = new Map<unknown, number>();
+  for (const card of renderer.root.findAllByType(EventCard)) {
+    // Upwards from the card to the first host node that lays its children out
+    // in a line — the row. Counting parent hops instead would depend on how
+    // many wrappers `View` happens to render.
+    let node = card.parent;
+    while (node && !(typeof node.type === 'string'
+      && StyleSheet.flatten(node.props.style)?.flexDirection === 'row')) {
+      node = node.parent;
+    }
+    rows.set(node, (rows.get(node) ?? 0) + 1);
+  }
+  return Math.max(0, ...rows.values());
+}
+
+/** Three detections on one day, so a landscape row can be full and a third left over. */
+async function seedHistory() {
+  const noon = new Date().setHours(12, 0, 0, 0);
+  await AsyncStorage.setItem('@novaguard:events:v2', JSON.stringify([
+    { id: 3, kind: 'Personne', timestamp: noon, dur: 5, conf: 90, path: '/c/3.mp4', bytes: 1024 },
+    { id: 2, kind: 'Animal', timestamp: noon - 60_000, dur: 5, conf: 90, path: '/c/2.mp4', bytes: 1024 },
+    { id: 1, kind: 'Personne', timestamp: noon - 120_000, dur: 5, conf: 90, path: '/c/1.mp4', bytes: 1024 },
+  ]));
+}
+
 beforeEach(async () => {
   await AsyncStorage.clear();
+  await seedHistory();
   jest.useFakeTimers();
 });
 
@@ -105,8 +143,10 @@ describe('held horizontally', () => {
   });
 
   it('lays the history out in two columns', async () => {
-    const list = await openHistory(await boot(LANDSCAPE));
-    expect(list.props.numColumns).toBe(2);
+    const renderer = await boot(LANDSCAPE);
+    await openHistory(renderer);
+    expect(renderer.root.findAllByType(EventCard)).toHaveLength(3);
+    expect(widestRow(renderer)).toBe(2);
   });
 });
 
@@ -124,8 +164,10 @@ describe('held upright', () => {
   });
 
   it('keeps the history in a single column', async () => {
-    const list = await openHistory(await boot(PORTRAIT));
-    expect(list.props.numColumns).toBe(1);
+    const renderer = await boot(PORTRAIT);
+    await openHistory(renderer);
+    expect(renderer.root.findAllByType(EventCard)).toHaveLength(3);
+    expect(widestRow(renderer)).toBe(1);
   });
 
 });
@@ -144,16 +186,18 @@ describe('turning the phone under a running app', () => {
   });
 
   it('switches the history to two columns and back', async () => {
-    // Also the guard on the list's `key`: FlatList asserts on a `numColumns`
-    // that changes without one, so dropping it fails this test by throwing.
+    // This is why the columns stopped being `numColumns`: FlatList raises an
+    // invariant when that prop changes on a live list, so it had to be paired
+    // with a changing `key` — which threw the list away and rebuilt every row
+    // on each rotation. Rows composed in the screen just re-render.
     const renderer = await boot(PORTRAIT);
     await openHistory(renderer);
-    expect(renderer.root.findByType(FlatList).props.numColumns).toBe(1);
+    expect(widestRow(renderer)).toBe(1);
 
     await rotate(LANDSCAPE);
-    expect(renderer.root.findByType(FlatList).props.numColumns).toBe(2);
+    expect(widestRow(renderer)).toBe(2);
 
     await rotate(PORTRAIT);
-    expect(renderer.root.findByType(FlatList).props.numColumns).toBe(1);
+    expect(widestRow(renderer)).toBe(1);
   });
 });

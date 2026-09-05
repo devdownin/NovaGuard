@@ -38,6 +38,9 @@ export const fr = {
   'view.overlay.animal': 'Animal détecté · enregistrement',
   'view.overlay.none': 'Aucune détection',
   'view.overlay.idle': 'Caméra en veille',
+  // What the capture zoom costs: at z, only 1/z² of the sensor is left, and
+  // what falls outside reaches neither the file nor the detector.
+  'view.coverage': 'Champ réduit · {percent} %',
   'view.zoom.close': 'PLAN SERRÉ',
   'view.zoom.wide': 'PLAN LARGE',
 
@@ -46,6 +49,9 @@ export const fr = {
   'hist.count.one': '{count} vidéo',
   'hist.count.other': '{count} vidéos',
   'hist.empty': 'Aucun événement pour ce filtre.',
+  'hist.empty.reset': 'Voir tout',
+  'hist.empty.never': 'Rien n’a encore été filmé.',
+  'hist.empty.never.sub': 'Démarrez la surveillance depuis l’onglet Caméra : chaque personne ou animal confirmé écrira une vidéo ici.',
   'hist.event.person': 'Personne détectée',
   'hist.event.animal': 'Animal détecté',
   'hist.event.meta': '{dur} secondes · {conf} %',
@@ -270,6 +276,9 @@ export const fr = {
   'date.today': "Aujourd'hui, {time}",
   'date.yesterday': 'Hier, {time}',
   'date.other': '{day} {month}, {time}',
+  'date.dayToday': "Aujourd'hui",
+  'date.dayYesterday': 'Hier',
+  'date.dayOther': '{day} {month}',
   'date.months': 'janv.,févr.,mars,avr.,mai,juin,juil.,août,sept.,oct.,nov.,déc.',
 
   // ── stored values, displayed ─────────────────────────────────────────

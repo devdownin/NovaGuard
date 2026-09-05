@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { color, font } from '../theme';
 import { useAppState, useFilteredEvents } from '../state/AppStateContext';
@@ -6,6 +6,9 @@ import { HistoryFilter } from '../state/types';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { PeriodDropdown } from '../components/PeriodDropdown';
 import { EventCard } from '../components/EventCard';
+import { PrimaryOutlineButton } from '../components/OutlineButton';
+import { historyRows } from '../recording/library';
+import { formatDay } from '../utils/date';
 import { useLandscape } from '../utils/useLandscape';
 import { t, tn } from '../i18n';
 
@@ -21,12 +24,44 @@ function ItemSeparator() {
   return <View style={{ height: 8 }} />;
 }
 
+/**
+ * Nothing to show, and *why* — three situations the old single grey line ran
+ * together: never filmed anything, a filter narrower than the history, or a
+ * history the retention has emptied. The first is a new user's first screen and
+ * deserves a next step, not a negation.
+ */
+function EmptyHistory({ hasAnyEvent, onReset }: { hasAnyEvent: boolean; onReset: () => void }) {
+  if (!hasAnyEvent) {
+    return (
+      <View style={styles.emptyWrap}>
+        <Text style={styles.emptyTitle}>{t('hist.empty.never')}</Text>
+        <Text style={styles.emptyBody}>{t('hist.empty.never.sub')}</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.emptyWrap}>
+      <Text style={styles.emptyTitle}>{t('hist.empty')}</Text>
+      <PrimaryOutlineButton label={t('hist.empty.reset')} onPress={onReset} style={styles.emptyAction} />
+    </View>
+  );
+}
+
 export function HistoryScreen() {
   const {
-    filter, setFilter, period, setPeriod, periodOpen, togglePeriodOpen, selectEvent,
+    events, filter, setFilter, period, setPeriod, periodOpen, togglePeriodOpen, selectEvent,
   } = useAppState();
   const { shown } = useFilteredEvents();
   const landscape = useLandscape();
+
+  // A card is wide and short: one per line wastes most of a landscape window.
+  const perRow = landscape ? 2 : 1;
+  const rows = useMemo(() => historyRows(shown, perRow), [shown, perRow]);
+
+  const resetFilters = useCallback(() => {
+    setFilter('Toutes');
+    setPeriod('Tout');
+  }, [setFilter, setPeriod]);
 
   return (
     <View style={styles.screen}>
@@ -50,23 +85,26 @@ export function HistoryScreen() {
       )}
 
       <FlatList
-        data={shown}
-        keyExtractor={e => String(e.id)}
-        // A card is a wide, short row: one per line wastes most of a landscape
-        // window, so it goes to two columns there. `numColumns` cannot change
-        // on a live list — hence the key, which remounts it on rotation.
-        key={landscape ? 'grid' : 'list'}
-        numColumns={landscape ? 2 : 1}
-        contentContainerStyle={[styles.list, landscape && styles.listGrid]}
-        renderItem={({ item }) => (
-          <View style={landscape ? styles.gridCell : undefined}>
-            <EventCard event={item} onPress={() => selectEvent(item.id)} />
-          </View>
-        )}
+        data={rows}
+        keyExtractor={row => row.key}
+        contentContainerStyle={styles.list}
+        renderItem={({ item }) => (item.kind === 'day'
+          ? <Text style={styles.dayHeading}>{formatDay(item.day)}</Text>
+          : (
+            <View style={styles.row}>
+              {item.events.map(event => (
+                <View key={event.id} style={styles.cell}>
+                  <EventCard event={event} onPress={() => selectEvent(event.id)} />
+                </View>
+              ))}
+              {/* Keeps a lone last card the width of a column instead of
+                  letting it stretch across the row. */}
+              {item.events.length < perRow
+                && <View style={[styles.cell, styles.cellFiller]} />}
+            </View>
+          ))}
         ItemSeparatorComponent={ItemSeparator}
-        ListEmptyComponent={
-          <Text style={styles.empty}>{t('hist.empty')}</Text>
-        }
+        ListEmptyComponent={<EmptyHistory hasAnyEvent={events.length > 0} onReset={resetFilters} />}
       />
     </View>
   );
@@ -111,24 +149,47 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
     flexGrow: 1,
   },
-  // The 4 dp each cell adds back is taken off the list's own padding, so the
-  // outer margin stays the 14 dp it is in portrait.
-  listGrid: {
-    paddingHorizontal: 10,
+  row: {
+    flexDirection: 'row',
+    gap: 8,
   },
-  // `maxWidth` so a lone last card keeps a column's width instead of being
-  // stretched across the whole row by `flex`.
-  gridCell: {
+  cell: {
     flex: 1,
-    maxWidth: '50%',
-    paddingHorizontal: 4,
   },
-  empty: {
-    paddingVertical: 46,
+  cellFiller: {
+    // Holds the empty half of an odd last row open.
+    opacity: 0,
+  },
+  dayHeading: {
+    fontFamily: font.medium,
+    fontSize: 11,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    color: color.neutral500,
+    paddingTop: 8,
+    paddingBottom: 2,
+  },
+  emptyWrap: {
+    paddingVertical: 40,
     paddingHorizontal: 20,
+    alignItems: 'center',
+    gap: 10,
+  },
+  emptyTitle: {
+    fontFamily: font.medium,
+    fontSize: 14,
+    color: color.neutral300,
     textAlign: 'center',
-    color: color.neutral600,
+  },
+  emptyBody: {
     fontFamily: font.regular,
     fontSize: 12,
+    lineHeight: 18,
+    color: color.neutral600,
+    textAlign: 'center',
+  },
+  emptyAction: {
+    marginTop: 4,
+    minWidth: 160,
   },
 });

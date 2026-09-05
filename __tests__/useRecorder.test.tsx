@@ -16,6 +16,7 @@ import * as fs from '@dr.pogodin/react-native-fs';
 import { Clip, FINALIZE_TIMEOUT_MS, useRecorder } from '../src/recording/useRecorder';
 import { MaxDuration } from '../src/state/types';
 import { maxDurationMs } from '../src/recording/library';
+import { RECORDINGS_DIR } from '../src/recording/videoStore';
 
 const mockFs = fs as jest.Mocked<typeof fs>;
 
@@ -24,6 +25,8 @@ interface Harness {
   camera: { startRecording: jest.Mock; stopRecording: jest.Mock };
 }
 
+const SNAPSHOT = `${RECORDINGS_DIR}/snap.jpg`;
+
 /** Captures VisionCamera's two callbacks so a test can fire them itself. */
 function fakeCamera() {
   const calls: { onRecordingFinished: Function; onRecordingError: Function }[] = [];
@@ -31,6 +34,9 @@ function fakeCamera() {
     calls,
     startRecording: jest.fn(opts => calls.push(opts)),
     stopRecording: jest.fn(),
+    // The still kept for the history. Answers a path by default so the clip
+    // carries one; a test that wants the screen-off case rejects it.
+    takeSnapshot: jest.fn(async () => ({ path: SNAPSHOT })),
     last: () => calls[calls.length - 1],
   };
 }
@@ -39,7 +45,7 @@ async function mount(
   camera: ReturnType<typeof fakeCamera>,
   {
     enabled = true, max = '1 min' as MaxDuration, onClip = jest.fn(), onError = jest.fn(),
-    onMaxDuration = jest.fn(), onAbandoned = jest.fn(),
+    onMaxDuration = jest.fn(), onAbandoned = jest.fn(), onEncoderFree = jest.fn(),
   } = {},
 ) {
   const box = {} as Harness & { onClip: jest.Mock; onError: jest.Mock; unmount: () => void };
@@ -50,6 +56,7 @@ async function mount(
     const ref = useRef<Camera | null>(camera as unknown as Camera);
     box.recorder = useRecorder({
       cameraRef: ref, enabled: on, max: cap, onClip, onError, onMaxDuration, onAbandoned,
+      onEncoderFree,
     });
     return null;
   }
@@ -132,7 +139,9 @@ it('hands the finished clip over with its real size read from disk', async () =>
   });
 
   // `VideoFile` carries no size, so it comes from stat() once the file closed.
-  expect(onClip).toHaveBeenCalledWith<[Clip]>({ path: '/clips/a.mp4', bytes: 4096, duration: 12.4 });
+  expect(onClip).toHaveBeenCalledWith<[Clip]>({
+    path: '/clips/a.mp4', bytes: 4096, duration: 12.4, thumbPath: SNAPSHOT,
+  });
   expect(h.recorder.isRecording).toBe(false);
 });
 
@@ -184,7 +193,7 @@ it('drops the duration cap once the clip has landed, so it cannot cut the next o
   await ReactTestRenderer.act(async () => { h.recorder.start(); });
   await ReactTestRenderer.act(async () => { jest.advanceTimersByTime(1_000); });
   await ReactTestRenderer.act(async () => {
-    camera.last().onRecordingFinished({ path: '/clips/a.mp4', duration: 1 });
+    camera.last().onRecordingFinished({ path: '/clips/a.mp4', duration: 1 , thumbPath: null});
   });
 
   // A long second passage opens. Asserting only "the cap did not fire after the
@@ -276,7 +285,7 @@ describe('a stop the encoder never answers', () => {
     await ReactTestRenderer.act(async () => { h.recorder.start(); });
     await ReactTestRenderer.act(async () => { h.recorder.stop(); });
     await ReactTestRenderer.act(async () => {
-      camera.last().onRecordingFinished({ path: '/clips/a.mp4', duration: 3 });
+      camera.last().onRecordingFinished({ path: '/clips/a.mp4', duration: 3 , thumbPath: null});
     });
     await ReactTestRenderer.act(async () => {
       jest.advanceTimersByTime(FINALIZE_TIMEOUT_MS * 2);
@@ -365,7 +374,7 @@ describe('a stop that is still in flight', () => {
     expect(h.recorder.isRecording).toBe(true);
 
     await ReactTestRenderer.act(async () => {
-      camera.last().onRecordingFinished({ path: '/clips/a.mp4', duration: 3 });
+      camera.last().onRecordingFinished({ path: '/clips/a.mp4', duration: 3 , thumbPath: null});
     });
     expect(h.recorder.isRecording).toBe(false);
   });
@@ -402,5 +411,95 @@ describe('a stop that is still in flight', () => {
     await ReactTestRenderer.act(async () => { jest.advanceTimersByTime(1); });
     expect(h.recorder.isRecording).toBe(false);
     await ReactTestRenderer.act(async () => { expect(h.recorder.start()).toBe(true); });
+  });
+});
+
+describe('the still kept for the history', () => {
+  it('is taken as the clip opens, into the recordings directory', async () => {
+    const camera = fakeCamera();
+    const h = await mount(camera);
+
+    await ReactTestRenderer.act(async () => { h.recorder.start(); });
+
+    // Not `takePhoto`: that needs a photo output in the capture session, and
+    // reconfiguring the session mid-passage is what this repo already paid for.
+    expect(camera.takeSnapshot).toHaveBeenCalledTimes(1);
+    expect(camera.takeSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ path: RECORDINGS_DIR }),
+    );
+    // Straight into the recordings directory rather than the temp one, so the
+    // launch sweep accounts for it like every other file there.
+    expect(camera.startRecording).toHaveBeenCalledTimes(1);
+  });
+
+  it('never holds the clip up: the encoder is released first', async () => {
+    const camera = fakeCamera();
+    const onEncoderFree = jest.fn();
+    // A snapshot that never lands. The clip must not be reported before it —
+    // that would orphan the JPEG — but the camera must be freed regardless.
+    camera.takeSnapshot.mockReturnValue(new Promise(() => {}));
+    const onClip = jest.fn();
+    const h = await mount(camera, { onClip, onEncoderFree });
+
+    await ReactTestRenderer.act(async () => { h.recorder.start(); });
+    await ReactTestRenderer.act(async () => {
+      camera.last().onRecordingFinished({ path: '/clips/a.mp4', duration: 3 });
+    });
+
+    expect(onEncoderFree).toHaveBeenCalledTimes(1);
+    expect(onClip).not.toHaveBeenCalled();
+  });
+
+  it('files the clip without one when there is no preview to snapshot', async () => {
+    const camera = fakeCamera();
+    // What a clip recorded with the screen off gets: `preview` is off, so the
+    // GPU view screenshot has no view. The clip is worth more than the still.
+    camera.takeSnapshot.mockRejectedValue(new Error('no preview'));
+    const onClip = jest.fn();
+    const h = await mount(camera, { onClip });
+
+    await ReactTestRenderer.act(async () => { h.recorder.start(); });
+    await ReactTestRenderer.act(async () => {
+      camera.last().onRecordingFinished({ path: '/clips/a.mp4', duration: 3 });
+    });
+
+    expect(onClip).toHaveBeenCalledWith(expect.objectContaining({
+      path: '/clips/a.mp4', thumbPath: null,
+    }));
+  });
+
+  it('deletes the still when the encoder errors and no clip is coming', async () => {
+    const camera = fakeCamera();
+    const h = await mount(camera);
+
+    await ReactTestRenderer.act(async () => { h.recorder.start(); });
+    await ReactTestRenderer.act(async () => {
+      camera.last().onRecordingError({ message: 'encoder died' });
+    });
+    await ReactTestRenderer.act(async () => {});
+
+    // Nothing will ever point at it, and only the next launch would sweep it.
+    expect(mockFs.unlink).toHaveBeenCalledWith(SNAPSHOT);
+  });
+
+  it('takes a fresh one for each clip of a long passage', async () => {
+    const camera = fakeCamera();
+    const onClip = jest.fn();
+    const h = await mount(camera, { onClip });
+
+    await ReactTestRenderer.act(async () => { h.recorder.start(); });
+    await ReactTestRenderer.act(async () => {
+      camera.last().onRecordingFinished({ path: '/clips/a.mp4', duration: 60 });
+    });
+    camera.takeSnapshot.mockResolvedValueOnce({ path: `${RECORDINGS_DIR}/snap2.jpg` });
+    await ReactTestRenderer.act(async () => { h.recorder.start(); });
+    await ReactTestRenderer.act(async () => {
+      camera.last().onRecordingFinished({ path: '/clips/b.mp4', duration: 60 });
+    });
+
+    // The second clip carries its own frame, not the first one's — which would
+    // also mean two events pointing at one file, so deleting either breaks the other.
+    expect(onClip.mock.calls.map(c => c[0].thumbPath))
+      .toEqual([SNAPSHOT, `${RECORDINGS_DIR}/snap2.jpg`]);
   });
 });

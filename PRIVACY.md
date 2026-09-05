@@ -1,6 +1,8 @@
 # Politique de confidentialité — NovaGuard
 
-**Dernière mise à jour : 4 septembre 2026**
+*[English version](PRIVACY.en.md)*
+
+**Dernière mise à jour : 5 septembre 2026**
 
 NovaGuard est une application de surveillance qui transforme un téléphone Android
 en caméra de détection. Elle est publiée sous licence GPL-3.0 et son code source
@@ -18,6 +20,7 @@ l'application produit reste sur votre téléphone.
 | Images de la caméra | Sur l'appareil, en mémoire | Non conservées telles quelles | Rien |
 | Détections (personne / animal) | Sur l'appareil, par un modèle embarqué | Historique local (`AsyncStorage`) | Rien |
 | Vidéos enregistrées | Sur l'appareil | Répertoire privé de l'application | Rien, sauf partage explicite (voir plus bas) |
+| Vignettes des vidéos | Sur l'appareil | Répertoire privé de l'application, supprimées avec leur vidéo | Rien |
 | Son (si le micro est autorisé) | Sur l'appareil | Dans la piste audio des vidéos | Rien |
 | Réglages et compteurs | Sur l'appareil | Stockage local de l'application | Rien |
 

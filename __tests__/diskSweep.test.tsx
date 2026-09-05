@@ -180,3 +180,67 @@ describe('free space after a deletion', () => {
     expect(handle.state.storage.free).toBe(21 * GB);
   });
 });
+
+/**
+ * An event owns two files now, and every place that deletes one has to delete
+ * both. A still left behind is invisible: nothing in the app lists it, its
+ * bytes are not in the storage figure, and only the next launch's orphan sweep
+ * would ever reclaim it.
+ */
+describe('deleting an event takes its still with it', () => {
+  const withStill = (id: number, timestamp: number) => ({
+    id, kind: 'Personne', timestamp, dur: 5, conf: 90,
+    path: `/c/${id}.mp4`, bytes: GB, thumbPath: `/c/${id}.jpg`,
+  });
+
+  it('from the detail sheet', async () => {
+    await AsyncStorage.setItem('@novaguard:events:v2', JSON.stringify([withStill(1, Date.now())]));
+    reportSpace(20 * GB);
+
+    const handle = await mountProvider();
+    await ReactTestRenderer.act(async () => { handle.state.selectEvent(1); });
+    await ReactTestRenderer.act(async () => { handle.state.doDelete(); });
+
+    expect(mockFs.unlink).toHaveBeenCalledWith('/c/1.mp4');
+    expect(mockFs.unlink).toHaveBeenCalledWith('/c/1.jpg');
+  });
+
+  it('from "delete every video"', async () => {
+    await AsyncStorage.setItem('@novaguard:events:v2', JSON.stringify([
+      withStill(2, Date.now()), withStill(1, Date.now() - 1000),
+    ]));
+    reportSpace(20 * GB);
+
+    const handle = await mountProvider();
+    await ReactTestRenderer.act(async () => { handle.state.doWipe(); });
+
+    expect(mockFs.unlink.mock.calls.map(c => c[0]).sort())
+      .toEqual(['/c/1.jpg', '/c/1.mp4', '/c/2.jpg', '/c/2.mp4']);
+  });
+
+  it('when the retention expires it', async () => {
+    await AsyncStorage.setItem('@novaguard:settings', JSON.stringify({ ...defaultSettings, retention: '7 jours' }));
+    await AsyncStorage.setItem('@novaguard:events:v2', JSON.stringify([
+      withStill(1, Date.now() - 30 * 86_400_000),
+    ]));
+    reportSpace(20 * GB);
+
+    await mountProvider();
+    await ReactTestRenderer.act(async () => {});
+
+    expect(mockFs.unlink).toHaveBeenCalledWith('/c/1.jpg');
+  });
+
+  it('when the volume runs low and the sweep reclaims it', async () => {
+    await AsyncStorage.setItem('@novaguard:settings', JSON.stringify({ ...defaultSettings, autoDel: true }));
+    await AsyncStorage.setItem('@novaguard:events:v2', JSON.stringify([
+      withStill(2, Date.now()), withStill(1, Date.now() - 2 * 86_400_000),
+    ]));
+    reportSpace(LOW_SPACE_BYTES - 100 * 1024 * 1024);
+
+    await mountProvider();
+    await ReactTestRenderer.act(async () => {});
+
+    expect(mockFs.unlink).toHaveBeenCalledWith('/c/1.jpg');
+  });
+});
