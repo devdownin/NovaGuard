@@ -42,10 +42,11 @@ d'installations, si.
 | Construction de l'AAB | ✅ `scripts/build-aab.sh` + job `build-aab` sur tag |
 | `versionName` unique, depuis `package.json` | ✅ |
 | `versionCode` pilotable par la CI | ✅ `-PnovaguardVersionCode=` (numéro de run) |
-| Politique de confidentialité | ✅ [`PRIVACY.md`](../PRIVACY.md) — reste à publier à une URL |
+| Politique de confidentialité | ✅ [`PRIVACY.md`](../PRIVACY.md) — reste à publier à une URL, et à traduire |
 | Icône 512×512 | ✅ `assets/store/icon-512.png` |
 | Permissions justifiables une par une | ✅ vérifié par `__tests__/playRelease.test.ts` |
 | Absence de permission réseau | ✅ vérifiée par le même test |
+| Fiche Store, fr-FR et en-US | ✅ § 5, à coller dans la Console |
 | Visuel de présentation 1024×500 | ❌ à produire |
 | Captures d'écran | ❌ à produire sur appareil |
 | Compte développeur Play (25 $, vérification d'identité) | ❌ hors dépôt |
@@ -169,15 +170,27 @@ montrant la fonctionnalité.
 
 ---
 
-## 5. Fiche Store (brouillon FR)
+## 5. Fiche Store
 
-**Nom (30 car. max)**
+Play tient **une fiche par langue**, avec une langue par défaut et des
+traductions. L'application choisit désormais le français pour un appareil
+francophone et l'anglais pour tous les autres (`src/i18n`) : publier une fiche
+en français seulement offrirait à la moitié de ses utilisateurs potentiels une
+page qu'ils ne lisent pas pour une application qu'ils comprendraient.
+
+Les deux brouillons ci-dessous sont à coller tels quels dans **Présence sur le
+Store → Fiche Play Store principale**, `fr-FR` puis `en-US`. Les compteurs sont
+les limites de Play ; les longueurs indiquées sont celles de ces textes.
+
+### fr-FR
+
+**Nom** (30 max, ici 25)
 `NovaGuard — Caméra locale`
 
-**Description courte (80 car. max)**
+**Description courte** (80 max, ici 78)
 `Transformez un téléphone en caméra de surveillance. Tout reste sur l'appareil.`
 
-**Description complète (4 000 car. max)**
+**Description complète** (4 000 max, ici 1 867)
 
 ```
 NovaGuard transforme un téléphone Android en caméra de surveillance
@@ -223,13 +236,80 @@ Vous restez responsable de ce que vous filmez : selon le pays, filmer des
 personnes est encadré par la loi.
 ```
 
+### en-US
+
+**Name** (30 max, here 24)
+`NovaGuard — Local Camera`
+
+**Short description** (80 max, here 68)
+`Turn a phone into a security camera. Everything stays on the device.`
+
+**Full description** (4,000 max, here 1,714)
+
+```
+NovaGuard turns an Android phone into a smart security camera. Detection and
+recording happen entirely on the device: no account, no server, no subscription.
+
+ON-DEVICE DETECTION
+People and animals are recognised locally by a bundled model. A subject has to
+be seen in several consecutive frames before a recording starts, which keeps
+false alarms out, and a brief occlusion does not split one event in two.
+
+AUTOMATIC RECORDING
+Every confirmed detection writes a video, named after what triggered it.
+Quality (720p, 1080p, 4K), how long recording continues after a detection, and
+the maximum length of a clip are all adjustable.
+
+AUTOMATIC ZOOM
+When someone is detected, the framing eases in on that person, whole, holds
+there, then pulls back to a wide shot of the scene.
+
+MONITORING WITH THE SCREEN OFF
+A foreground service keeps the camera running in the background, with an
+ongoing notification showing that recording is possible.
+
+HISTORY AND STORAGE
+Events can be filtered by type and by period, and each one plays back in place.
+Retention is configurable from 1 to 90 days, and the oldest clips are deleted
+automatically when space runs short.
+
+PRIVACY BY DESIGN
+Videos are written to the app's private storage: no other app can read them,
+nothing shows up in the shared gallery, and everything disappears when the app
+is uninstalled. NovaGuard does not even ask for internet permission — it is
+technically incapable of sending anything anywhere. The only way a video ever
+leaves is the Share button, which only you press.
+
+Full source code, under the GPL-3.0 licence:
+https://github.com/devdownin/novaguard
+
+What you film remains your responsibility: in many countries, filming people is
+regulated by law.
+```
+
+### Le reste de la fiche, commun aux deux langues
+
 **URL de la politique de confidentialité** — [`PRIVACY.md`](../PRIVACY.md) doit
 être servi à une adresse publique et stable. Le plus simple sans infrastructure :
 activer GitHub Pages sur le dépôt, ou pointer sur la vue GitHub du fichier.
+**Elle n'existe qu'en français** : Play n'en exige qu'une, mais une fiche
+anglaise renvoyant vers un texte français est ce qu'un examinateur lira. À
+traduire avant de publier la fiche `en-US`.
 
-**Catégorie** : Outils. **Étiquettes** : sécurité, caméra, surveillance.
+**Catégorie** : Outils / Tools. **Étiquettes** : sécurité, caméra, surveillance.
 **Coordonnées** : e-mail de contact obligatoire et affiché publiquement sur la
 fiche — prévoir une adresse dédiée plutôt qu'une adresse personnelle.
+
+**Captures d'écran** : Play les demande **par langue**. Les mêmes images peuvent
+servir aux deux fiches, mais elles montreront l'interface dans la langue de
+l'appareil qui les a produites — donc deux jeux, ou un jeu neutre, à décider en
+même temps que les captures elles-mêmes (§ 6).
+
+**Ce qui n'est pas traduit, et pourquoi** : les textes anglais ci-dessus, comme
+le catalogue `src/i18n/en.ts`, n'ont pas été relus par un anglophone natif. Ils
+sont écrits avec soin et tiennent dans les limites de Play, mais une relecture
+reste à faire — une faute sur la fiche est la première chose que voit un
+visiteur du Store.
 
 ---
 
