@@ -8,31 +8,51 @@ import { useFaceDetector } from 'react-native-vision-camera-face-detector';
 import { useRunOnJS } from 'react-native-worklets-core';
 import { useAppState } from '../state/AppStateContext';
 import { devicePositionFor, physicalDeviceFilterFor } from '../camera/deviceSelection';
-import { uprightAspect, uprightRotation } from '../camera/orientation';
+import { swapsAxes, uprightAspect, uprightRotation } from '../camera/orientation';
 import { t } from '../i18n';
 import { uprightBoxToViewBox } from '../camera/framing';
 import { useDetectionModel } from '../camera/useDetectionModel';
 import { interpretDetections } from '../ml/interpretDetections';
+import { letterboxFor, letterboxInto } from '../ml/letterbox';
+import { SENSITIVITY_PROFILES } from '../ml/sensitivity';
 import { frameErrorMessage } from '../camera/frameErrors';
 import { FrameStage } from '../camera/frameTrace';
 import { qualityBitRate, qualityResolution } from '../recording/library';
 import { DetectionBox, FrameDetection } from '../ml/types';
 
-const MODEL = require('../../assets/models/efficientdet-lite0.tflite');
-/** EfficientDet-Lite0 takes a 320x320 uint8 image (verified against the model file). */
-const MODEL_INPUT_SIZE = 320;
+/**
+ * The two detectors, and the input each was exported with (both verified
+ * against the model files themselves: uint8, NHWC, and the same four output
+ * tensors in the same order).
+ *
+ * They come from the same TensorFlow mirror and carry the *same* 90-entry
+ * labelmap, byte for byte — which is the one thing that has to hold for
+ * `labels.ts` to stay valid, and the one that silently kills detection when it
+ * does not. Lite2 is markedly better on small subjects, which on a surveillance
+ * camera is most of them, and costs roughly three times the inference: hence a
+ * setting rather than a swap.
+ */
+const MODEL_STANDARD = require('../../assets/models/efficientdet-lite0.tflite');
+const MODEL_PRECISE = require('../../assets/models/efficientdet-lite2.tflite');
+const STANDARD_INPUT_SIZE = 320;
+const PRECISE_INPUT_SIZE = 448;
+/** `pixelFormat: 'rgb'` — three bytes per pixel. */
+const MODEL_INPUT_CHANNELS = 3;
 
 /**
- * Frames per second handed to the model.
+ * Lowest score worth handing to the tracker.
  *
- * This is what "Sensibilité" actually controls, and it is worth being explicit
- * about: it sets how often the scene is looked at, so it governs how quickly a
- * subject is confirmed and how responsive the auto-zoom feels. It no longer
- * governs how long an occlusion is tolerated — the tracker counts that in
- * milliseconds (see `dropAfterMs`) so the same gap means the same thing at
- * every setting.
+ * Not the user's "seuil de confiance": that one now decides which detections may
+ * *open* a track (`startConfidence`), while this decides which are worth
+ * associating at all. Everything between the two is a subject the detector is
+ * unsure about — which is what a person half in shadow, at the end of a garden
+ * or turned away actually looks like at 320 px — and keeping those looks is what
+ * lets an already-open track survive them instead of ending mid-passage.
+ *
+ * Low enough to catch that, high enough that the tracker is not sifting the 25
+ * near-zero slots the model always returns.
  */
-const FPS_BY_SENSITIVITY = { Basse: 1, Moyenne: 3, Haute: 5 } as const;
+const DETECTION_FLOOR = 0.3;
 
 interface CameraFeedProps {
   style: StyleProp<ViewStyle>;
@@ -97,9 +117,14 @@ export function CameraFeed({
   ]);
 
   const { resize } = useResizePlugin();
+  const precise = settings.preciseDetection;
   // `failed` used to be computed and thrown away, so a model both delegates
   // refused looked exactly like a working camera that never sees anything.
-  const { model, failed: modelFailed } = useDetectionModel(MODEL, settings.forceCpu);
+  const { model, failed: modelFailed } = useDetectionModel(
+    precise ? MODEL_PRECISE : MODEL_STANDARD,
+    settings.forceCpu,
+  );
+  const inputSize = precise ? PRECISE_INPUT_SIZE : STANDARD_INPUT_SIZE;
 
   useEffect(() => {
     if (!onProblem) return;
@@ -188,10 +213,11 @@ export function CameraFeed({
   const maxZoomFactor = device ? device.maxZoom / device.neutralZoom : 1;
   useEffect(() => { onZoomRange?.(maxZoomFactor); }, [maxZoomFactor, onZoomRange]);
 
-  const targetFps = FPS_BY_SENSITIVITY[settings.sens];
+  // "Sensibilité" sets three things that trade against each other; the other
+  // two reach the tracker, in `reportDetections` (see `sensitivity.ts`).
+  const targetFps = SENSITIVITY_PROFILES[settings.sens].fps;
   const detectPerson = settings.person;
   const detectAnimal = settings.animal;
-  const minConfidence = settings.threshold / 100;
   const autoZoom = settings.autoZoom;
   const viewW = viewWidth || 1;
   const viewH = viewHeight || 1;
@@ -226,20 +252,41 @@ export function CameraFeed({
         // process outright, and a record of the last thing that worked names
         // everything except the culprit.
         onFrameStage('resize');
-        // Feed the model the WHOLE frame, uprighted. The previous version let
-        // the plugin centre-crop to a square, which threw away the sides of the
+        // Feed the model the WHOLE frame, uprighted. An earlier version let the
+        // plugin centre-crop to a square, which threw away the sides of the
         // field of view, and left the scene rotated for a portrait-held phone.
+        //
+        // Uniformly scaled into a corner of the square rather than stretched to
+        // fill it: the plugin resizes to exactly the size it is given, so asking
+        // for 320x320 squashed a 16:9 frame and handed the detector people 1.78x
+        // too wide (see `letterbox.ts`). The plugin scales *before* it rotates,
+        // so the size asked for is in the frame buffer's own axes — swapped for
+        // a landscape-held phone, whose buffer is uprighted by a quarter turn.
+        const aspect = uprightAspect(frame.width, frame.height, frame.orientation);
+        const inner = letterboxFor(aspect, inputSize);
+        const swap = swapsAxes(frame.orientation);
         const resized = resize(frame, {
           crop: { x: 0, y: 0, width: frame.width, height: frame.height },
-          scale: { width: MODEL_INPUT_SIZE, height: MODEL_INPUT_SIZE },
+          scale: swap
+            ? { width: inner.height, height: inner.width }
+            : { width: inner.width, height: inner.height },
           rotation: uprightRotation(frame.orientation),
           pixelFormat: 'rgb',
           dataType: 'uint8',
         });
+        const input = letterboxInto(resized, inner, inputSize, MODEL_INPUT_CHANNELS);
         onFrameStage('inference');
         // The model's 4 outputs are always float32 (see interpretDetections' doc comment).
-        const outputs = model.runSync([resized]) as Float32Array[];
-        const detections = interpretDetections(outputs, { detectPerson, detectAnimal, minConfidence });
+        const outputs = model.runSync([input]) as Float32Array[];
+        const detections = interpretDetections(outputs, {
+          detectPerson,
+          detectAnimal,
+          floorConfidence: DETECTION_FLOOR,
+          // Boxes come back as fractions of the square, so the padded axis has
+          // to be stretched back out before anything downstream sees them.
+          scaleX: inputSize / inner.width,
+          scaleY: inputSize / inner.height,
+        });
 
         // ML Kit is asked only when its answer can change something. Since the
         // zoom frames whole people, a face no longer decides how close to get —
@@ -279,7 +326,7 @@ export function CameraFeed({
         }
 
         onFrameStage('report');
-        onJsFrame(detections, faces, uprightAspect(frame.width, frame.height, frame.orientation));
+        onJsFrame(detections, faces, aspect);
       } catch (e) {
         // Plain property access, no `instanceof`: the worklet runtime is not
         // the one this value's prototype came from.
@@ -287,7 +334,7 @@ export function CameraFeed({
         onFrameError(failure?.message ?? 'erreur inconnue');
       }
     });
-  }, [model, resize, onJsFrame, onFrameError, onFrameStage, detectFaces, autoZoom, viewW, viewH, targetFps, detectPerson, detectAnimal, minConfidence]);
+  }, [model, inputSize, resize, onJsFrame, onFrameError, onFrameStage, detectFaces, autoZoom, viewW, viewH, targetFps, detectPerson, detectAnimal]);
 
   if (!perms.cam || device == null) return null;
 

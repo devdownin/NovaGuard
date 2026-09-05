@@ -27,7 +27,7 @@ Caméra de surveillance intelligente, locale et open source. NovaGuard transform
 - [React Native](https://reactnative.dev) (CLI *bare*, sans Expo) — Android 16 (API 36) minimum ; `minSdk`, `compileSdk` et `targetSdk` sont tous à 36, donc un seul niveau de plateforme à supporter
 - TypeScript
 - [react-native-vision-camera](https://github.com/mrousavy/react-native-vision-camera) pour le flux caméra et les frame processors
-- [react-native-fast-tflite](https://github.com/mrousavy/react-native-fast-tflite) pour l'inférence TensorFlow Lite embarquée (modèle `assets/models/efficientdet-lite0.tflite`, quantifié uint8 320×320, licence Apache-2.0), avec délégué GPU et repli CPU automatique
+- [react-native-fast-tflite](https://github.com/mrousavy/react-native-fast-tflite) pour l'inférence TensorFlow Lite embarquée (`assets/models/efficientdet-lite0.tflite`, quantifié uint8 320×320, et `efficientdet-lite2.tflite` en 448 px derrière le réglage « Détection étendue » — même labelmap COCO, licence Apache-2.0), avec délégué GPU et repli CPU automatique
 - [react-native-vision-camera-face-detector](https://github.com/luicfrr/react-native-vision-camera-face-detector) (ML Kit) pour la détection de visages, qui désigne le sujet du zoom auto
 - [vision-camera-resize-plugin](https://github.com/mrousavy/vision-camera-resize-plugin) et [react-native-worklets-core](https://github.com/margelo/react-native-worklets-core) pour le traitement des frames sur un thread dédié
 - [react-native-svg](https://github.com/software-mansion/react-native-svg), [react-native-linear-gradient](https://github.com/react-native-linear-gradient/react-native-linear-gradient), [@react-native-community/slider](https://github.com/callstack/react-native-slider)

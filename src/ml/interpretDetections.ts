@@ -1,12 +1,34 @@
 import { KIND_BY_CLASS_INDEX } from './labels';
-import { FrameDetection } from './types';
+import { DetectionBox, FrameDetection } from './types';
 
 export interface InterpretOptions {
   detectPerson: boolean;
   detectAnimal: boolean;
-  /** 0–1 */
-  minConfidence: number;
+  /**
+   * Association floor, 0–1 — *not* the user's "seuil de confiance".
+   *
+   * Everything above this is handed to the tracker; what the user set decides
+   * which of those may open a track (`startConfidence` in `tracker.ts`). The two
+   * were one number, and the cost was every box under it never existing at all:
+   * a subject seen at 0.82 and then, half-turned or half-lit, at 0.51 looked to
+   * the tracker exactly like a subject who had left. Keeping the weak looks lets
+   * a track that a strong look opened survive on them.
+   */
+  floorConfidence: number;
+  /**
+   * Un-letterbox factors: the model was fed the frame scaled into the top-left
+   * of its square input (see `letterbox.ts`), so a coordinate it returns is a
+   * fraction of the *square*, not of the frame. 1 when nothing was padded.
+   */
+  scaleX: number;
+  scaleY: number;
 }
+
+/**
+ * Two hypotheses of different kinds overlapping by more than this are the same
+ * subject seen twice, and the weaker one is dropped.
+ */
+const CROSS_CLASS_IOU = 0.6;
 
 /**
  * Decodes the 4 output tensors of the bundled detection model
@@ -27,10 +49,31 @@ export interface InterpretOptions {
  *
  * Runs on the camera's frame-processor thread — must stay a worklet.
  */
-/** Worklet-safe: a local helper, not a closure over anything outside. */
+/** Worklet-safe: local helpers, not closures over anything outside. */
 function clamp01(value: number): number {
   'worklet';
   return value < 0 ? 0 : value > 1 ? 1 : value;
+}
+
+/**
+ * Overlap of two boxes, as a fraction of their union.
+ *
+ * Deliberately a copy of the tracker's `iou` rather than an import of it: that
+ * one is plain JavaScript, and a plain function reached from a worklet is
+ * replaced by a stub that throws on the first call (see `orientation.ts`).
+ */
+function overlapOf(a: DetectionBox, b: DetectionBox): number {
+  'worklet';
+  const x1 = Math.max(a.x, b.x);
+  const y1 = Math.max(a.y, b.y);
+  const x2 = Math.min(a.x + a.width, b.x + b.width);
+  const y2 = Math.min(a.y + a.height, b.y + b.height);
+  const w = x2 - x1;
+  const h = y2 - y1;
+  if (w <= 0 || h <= 0) return 0;
+  const overlap = w * h;
+  const union = a.width * a.height + b.width * b.height - overlap;
+  return union > 0 ? overlap / union : 0;
 }
 
 export function interpretDetections(outputs: Float32Array[], options: InterpretOptions): FrameDetection[] {
@@ -46,7 +89,7 @@ export function interpretDetections(outputs: Float32Array[], options: InterpretO
 
   for (let i = 0; i < count; i++) {
     const confidence = scores[i];
-    if (confidence == null || confidence < options.minConfidence) continue;
+    if (confidence == null || confidence < options.floorConfidence) continue;
 
     // Indexed lookup, not a label string: the class index is what the model
     // emits, and a computed access is also the only member access the worklets
@@ -58,16 +101,16 @@ export function interpretDetections(outputs: Float32Array[], options: InterpretO
     if (kind === 'Personne' ? !options.detectPerson : !options.detectAnimal) continue;
 
     const o = i * 4;
-    // Clamp the corners, then derive the size from them. Clamping the origin
-    // and the size independently — which this did — inflates any box the model
-    // pushes past the frame edge, and edges are where surveillance subjects
-    // live. A person entering at xMin -0.08, xMax 0.25 came out 0.33 wide
-    // instead of 0.25, and one leaving at xMax 1.14 produced a box reaching 14%
-    // of the frame beyond its own right edge.
-    const yMin = clamp01(locations[o]);
-    const xMin = clamp01(locations[o + 1]);
-    const yMax = clamp01(locations[o + 2]);
-    const xMax = clamp01(locations[o + 3]);
+    // Undo the letterbox first, clamp the corners, then derive the size from
+    // them. Clamping the origin and the size independently — which this did —
+    // inflates any box the model pushes past the frame edge, and edges are where
+    // surveillance subjects live. A person entering at xMin -0.08, xMax 0.25
+    // came out 0.33 wide instead of 0.25, and one leaving at xMax 1.14 produced
+    // a box reaching 14% of the frame beyond its own right edge.
+    const yMin = clamp01(locations[o] * options.scaleY);
+    const xMin = clamp01(locations[o + 1] * options.scaleX);
+    const yMax = clamp01(locations[o + 2] * options.scaleY);
+    const xMax = clamp01(locations[o + 3] * options.scaleX);
 
     results.push({
       kind,
@@ -82,5 +125,22 @@ export function interpretDetections(outputs: Float32Array[], options: InterpretO
   }
 
   results.sort((a, b) => b.confidence - a.confidence);
+
+  // Cross-class suppression. The model's own NMS runs per class, so one subject
+  // can be returned twice under two labels — a crouching or distant figure reads
+  // as a dog or a bear often enough to matter now that the floor is low, and
+  // each spurious Animal is its own track, its own notification and its own
+  // history entry. Walking backwards over a list already sorted by confidence
+  // means the survivor is always the stronger hypothesis.
+  for (let i = results.length - 1; i > 0; i--) {
+    for (let j = 0; j < i; j++) {
+      if (results[j].kind === results[i].kind) continue;
+      if (overlapOf(results[i].box, results[j].box) > CROSS_CLASS_IOU) {
+        results.splice(i, 1);
+        break;
+      }
+    }
+  }
+
   return results;
 }

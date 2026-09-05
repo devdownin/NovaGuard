@@ -4,7 +4,7 @@ import React, {
 import type { Camera as VisionCamera } from 'react-native-vision-camera';
 import { Camera as CameraModule, useCameraPermission, useMicrophonePermission } from 'react-native-vision-camera';
 import {
-  Camera, DetectionEvent, DetectionKind, ExpandedSections, HistoryFilter, InfoPanel,
+  Camera, DetectionEvent, DetectionKind, DetectionZone, ExpandedSections, HistoryFilter, InfoPanel,
   MaxDuration, OnboardingStep, Period, PermissionOutcome, Permissions, PostRoll, Quality,
   Retention, Sensitivity, Settings, StorageInfo, Tab, VolumeSpace,
 } from './types';
@@ -16,6 +16,8 @@ import { useForeground } from './useForeground';
 import { useLatest } from '../utils/useLatest';
 import { FrameDetection } from '../ml/types';
 import { confirmedTracksIfChanged, primaryTrack, Track, updateTracks } from '../ml/tracker';
+import { trackerOptionsFor } from '../ml/sensitivity';
+import { detectionsInZone } from '../ml/zone';
 import { Clip, useRecorder } from '../recording/useRecorder';
 import {
   bytesToReclaim, clipFileName, clipOutcome, eventFiles, eventsToReclaim, expiredEvents, lowSpaceBytes,
@@ -111,6 +113,18 @@ interface AppStateValue {
   toggleAnimal: () => void;
   toggleAutoZoom: () => void;
   toggleForceCpu: () => void;
+  togglePreciseDetection: () => void;
+  /**
+   * True while the viewfinder is being used to draw the detection zone. The
+   * camera runs and the auto-zoom does not, so what is drawn lands on an
+   * untransformed preview — the only state in which view space and frame space
+   * line up.
+   */
+  zoneEditing: boolean;
+  beginZoneEdit: () => void;
+  cancelZoneEdit: () => void;
+  /** `null` clears the zone: the camera watches the whole frame again. */
+  saveZone: (zone: DetectionZone | null) => void;
   setSensitivity: (s: Sensitivity) => void;
   setThreshold: (v: number) => void;
   cyclePost: () => void;
@@ -508,6 +522,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   // Through a ref like everything else the frame path reads: taking it as a
   // dependency would rebuild the worklet every time the app is backgrounded.
   const foregroundRef = useLatest(foreground);
+  // Declared here rather than beside its own callbacks, because the frame path
+  // below reads it and has to be defined after everything it touches.
+  const [zoneEditing, setZoneEditing] = useState(false);
+  const zoneEditingRef = useLatest(zoneEditing);
   /**
    * The recorder's own `start` and `stop`, reached through refs.
    *
@@ -769,6 +787,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
      * is not a saving.
      */
     const shown = foregroundRef.current ? viewfinder.current : null;
+    // Set before anything else can return: the zone editor draws against this
+    // aspect, and analysing a frame is the only way to learn it.
+    shown?.setFrameAspect(aspect);
+    // The camera also runs while the zone is being drawn, and none of what it
+    // sees then is surveillance — tracking it would open a session, and with it
+    // a recording, on a screen whose buttons say "Annuler".
+    if (zoneEditingRef.current) return;
     // Through a ref so this stays a once-per-session write: `setSawFrame` is a
     // stable setter, so arming the resume flag costs the frame path nothing and
     // leaves this callback's identity — and the worklet's — untouched.
@@ -779,9 +804,17 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     // What "Sensibilité" asked for is a target; this is what the device manages.
     const measured = countFrame(frameWindowRef.current, now);
     if (measured != null) shown?.setFrameRate(measured);
-    shown?.setFrameAspect(aspect);
 
-    const next = updateTracks(tracksRef.current, detections, now);
+    // The user's threshold is the tracker's entry gate, not the detector's
+    // filter: `interpretDetections` now hands over everything above a low floor
+    // so a track already open can survive the weak looks a real subject produces
+    // when they turn away or step into shadow. Read through the ref like every
+    // other setting on this path — a dependency here would rebuild the worklet.
+    // The zone comes first: a detection outside it is not a subject, so it
+    // must not open a track, keep one alive, or hold off a post-roll.
+    const watched = detectionsInZone(detections, settingsRef.current.zone);
+    const next = updateTracks(tracksRef.current, watched, now,
+      trackerOptionsFor(settingsRef.current.sens, settingsRef.current.threshold));
     tracksRef.current = next;
     // Keep the previous array when nothing moved: every other setter here
     // already bails on `Object.is`, so this is what makes a still scene free.
@@ -832,7 +865,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         endSession();
       }, postRollMs(settingsRef.current.post));
     }
-  }, [cancelPostRoll, endSession, foregroundRef, hasRoomToRecord, settingsRef, startRecording]);
+  }, [cancelPostRoll, endSession, foregroundRef, hasRoomToRecord, settingsRef, startRecording, zoneEditingRef]);
 
   const toggleMonitoring = useCallback(() => {
     // Closing the session has to happen outside the updater: React may invoke
@@ -1049,6 +1082,26 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   // and closes the app. Downgrade exactly those; everything else keeps crashing.
   useEffect(() => installFrameErrorGuard(reportCameraProblem), [reportCameraProblem]);
 
+  const togglePreciseDetection = useCallback(
+    () => patchSettings({ preciseDetection: !settingsRef.current.preciseDetection }),
+    [patchSettings, settingsRef],
+  );
+
+  // Drawing happens on the viewfinder, so the camera tab has to be the one on
+  // screen — the row that starts this lives in Setup.
+  const beginZoneEdit = useCallback(() => { setTab('cam'); setZoneEditing(true); }, []);
+  const cancelZoneEdit = useCallback(() => setZoneEditing(false), []);
+  const saveZone = useCallback((zone: DetectionZone | null) => {
+    setZoneEditing(false);
+    patchSettings({ zone });
+  }, [patchSettings]);
+
+  // Leaving the camera tab abandons the drawing: the editor is off screen, and
+  // the camera would otherwise be left running for it.
+  useEffect(() => {
+    if (tab !== 'cam') setZoneEditing(false);
+  }, [tab]);
+
   const setSensitivity = useCallback((s: Sensitivity) => patchSettings({ sens: s }), [patchSettings]);
   const setThreshold = useCallback((v: number) => patchSettings({ threshold: v }), [patchSettings]);
   const setRetention = useCallback((r: Retention) => patchSettings({ retention: r }), [patchSettings]);
@@ -1109,6 +1162,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     confirmDelete, askDelete, cancelDelete, doDelete,
     confirmWipe, askWipe, cancelWipe, doWipe,
     settings, toggleSection, cycleCamera, toggleResumeOnLaunch, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom, toggleForceCpu,
+    togglePreciseDetection, zoneEditing, beginZoneEdit, cancelZoneEdit, saveZone,
     setSensitivity, setThreshold, cyclePost, cycleMax, cycleQuality, setRetention,
     toggleAutoDel, toggleNotif, toggleNotifDet, openAlertSoundSettings, wipeAllVideos,
     info, storedSize, openInfo, closeInfo,
@@ -1119,6 +1173,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     events, filter, period, periodOpen, togglePeriodOpen, selected, selectedEvent, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete, confirmWipe, askWipe, cancelWipe, doWipe,
     settings, toggleSection, cycleCamera, toggleResumeOnLaunch, toggleNight, togglePerson, toggleAnimal, toggleAutoZoom, toggleForceCpu,
+    togglePreciseDetection, zoneEditing, beginZoneEdit, cancelZoneEdit, saveZone,
     setSensitivity, setThreshold, cyclePost, cycleMax, cycleQuality, setRetention,
     toggleAutoDel, toggleNotif, toggleNotifDet, openAlertSoundSettings, wipeAllVideos,
     info, storedSize, openInfo, closeInfo, onb, perms, onbNext, onbFinish, grantPermission,

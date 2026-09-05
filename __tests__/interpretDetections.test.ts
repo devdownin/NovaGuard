@@ -33,7 +33,11 @@ function outputs(dets: Det[], count = dets.length): Float32Array[] {
   ];
 }
 
-const BOTH = { detectPerson: true, detectAnimal: true, minConfidence: 0.5 };
+// No letterbox padding: these cases are about decoding, not about geometry —
+// `letterbox.test.ts` owns the mapping back out of the padded square.
+const BOTH = {
+  detectPerson: true, detectAnimal: true, floorConfidence: 0.5, scaleX: 1, scaleY: 1,
+};
 const det = (corners: Det['corners'], classIndex = PERSON, score = 0.9): Det =>
   ({ corners, classIndex, score });
 
@@ -100,7 +104,7 @@ describe('box geometry', () => {
 });
 
 describe('filtering', () => {
-  it('drops anything under the confidence threshold', () => {
+  it('drops anything under the association floor', () => {
     const results = interpretDetections(
       outputs([det([0.1, 0.1, 0.4, 0.4], PERSON, 0.95), det([0.5, 0.5, 0.7, 0.7], PERSON, 0.42)]),
       BOTH,
@@ -144,5 +148,60 @@ describe('filtering', () => {
     expect(results.map(r => r.confidence)).toEqual([
       expect.closeTo(0.94), expect.closeTo(0.78), expect.closeTo(0.6),
     ]);
+  });
+});
+
+describe('cross-class suppression', () => {
+  // The model's own NMS runs per class, so one subject can come back under two
+  // labels. Each spurious Animal would be its own track, its own alert and its
+  // own history entry — and the low floor makes those weak second labels far
+  // more common than they were.
+  const BEAR = 22;
+
+  it('keeps only the stronger label when a person is also read as an animal', () => {
+    const results = interpretDetections(
+      outputs([
+        det([0.2, 0.3, 0.9, 0.5], PERSON, 0.71),
+        det([0.21, 0.31, 0.88, 0.49], BEAR, 0.54),
+      ]),
+      BOTH,
+    );
+    expect(results).toHaveLength(1);
+    expect(results[0].kind).toBe('Personne');
+  });
+
+  it('drops the person instead when the animal is the stronger reading', () => {
+    const results = interpretDetections(
+      outputs([
+        det([0.2, 0.3, 0.9, 0.5], PERSON, 0.55),
+        det([0.21, 0.31, 0.88, 0.49], DOG, 0.83),
+      ]),
+      BOTH,
+    );
+    expect(results.map(r => r.kind)).toEqual(['Animal']);
+  });
+
+  it('leaves a person and an animal that are genuinely both there', () => {
+    // A dog beside its owner overlaps hardly at all; suppressing that would
+    // lose half of what the app is asked to watch for.
+    const results = interpretDetections(
+      outputs([
+        det([0.2, 0.1, 0.9, 0.3], PERSON, 0.88),
+        det([0.7, 0.4, 0.95, 0.6], DOG, 0.62),
+      ]),
+      BOTH,
+    );
+    expect(results.map(r => r.kind).sort()).toEqual(['Animal', 'Personne']);
+  });
+
+  it('never suppresses within a kind — two people standing close both count', () => {
+    const results = interpretDetections(
+      outputs([
+        det([0.2, 0.3, 0.9, 0.5], PERSON, 0.9),
+        det([0.21, 0.31, 0.88, 0.49], PERSON, 0.8),
+      ]),
+      BOTH,
+    );
+    expect(results).toHaveLength(2);
   });
 });

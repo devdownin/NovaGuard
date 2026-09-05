@@ -9,6 +9,7 @@ import { formatFrameRate } from '../camera/frameRate';
 import { GridOverlay } from './GridOverlay';
 import { CameraFeed } from './CameraFeed';
 import { DetectionOverlay } from './DetectionOverlay';
+import { ZoneLayer } from './ZoneLayer';
 import { LiveClock } from './LiveClock';
 import { t } from '../i18n';
 
@@ -89,7 +90,7 @@ export function Viewfinder() {
   // component only re-renders when a session starts or a setting changes.
   const {
     monitoring, det, perms, settings, recording, recError, cameraRef, reportCameraProblem,
-    reportFrameStage,
+    reportFrameStage, zoneEditing,
   } = useAppState();
 
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -102,7 +103,10 @@ export function Viewfinder() {
   // the magnification entirely in the preview transform.
   const [maxCameraZoom, setMaxCameraZoom] = useState(1);
   const autoZoom = useAutoZoom({
-    enabled: monitoring && settings.autoZoom,
+    // Never while the zone is being drawn: a transformed preview is one where
+    // what the finger traces is not where the detector looks, and the zone
+    // would be saved against a crop that disappears the moment it is saved.
+    enabled: monitoring && settings.autoZoom && !zoneEditing,
     viewWidth: size.width,
     viewHeight: size.height,
     maxCameraZoom,
@@ -161,7 +165,10 @@ export function Viewfinder() {
           // `isActive` used to go false while the encoder was still closing the
           // file — tearing the capture session down under the clip being
           // finalised. The session now outlives the recording it is writing.
-          active={monitoring || recording}
+          // Drawing a zone needs the picture the zone applies to, so the
+          // camera runs for it too. Nothing seen during it is surveillance —
+          // `reportDetections` returns before it tracks anything.
+          active={monitoring || recording || zoneEditing}
           viewWidth={size.width}
           viewHeight={size.height}
           onFrame={autoZoom.submitFrame}
@@ -177,6 +184,8 @@ export function Viewfinder() {
 
         <DetectionOverlay viewWidth={size.width} viewHeight={size.height} />
       </Animated.View>
+
+      <ZoneLayer viewWidth={size.width} viewHeight={size.height} />
 
       {monitoring && size.height > 0 && <ScanBeam height={size.height} />}
 

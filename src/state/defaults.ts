@@ -7,9 +7,18 @@ export const defaultSettings: Settings = {
   person: true,
   animal: true,
   sens: 'Moyenne',
-  threshold: 75,
+  /**
+   * Score a detection needs to open a track (`startConfidence`), not to be
+   * looked at: weaker boxes still keep an open track alive. 75 as a single gate
+   * meant a subject at the end of a garden, or half in shadow, simply never
+   * existed — EfficientDet-Lite0 scores those in the 0.4–0.6 range and wobbles
+   * across any line drawn through it.
+   */
+  threshold: 60,
   autoZoom: true,
   forceCpu: false,
+  preciseDetection: false,
+  zone: null,
   post: '10 s',
   max: '2 min',
   quality: '1080p',
