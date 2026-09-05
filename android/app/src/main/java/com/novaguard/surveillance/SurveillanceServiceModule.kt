@@ -1,6 +1,8 @@
 package com.novaguard.surveillance
 
+import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
+import java.util.concurrent.Executors
 
 /**
  * JS entry point for {@link SurveillanceService}.
@@ -42,7 +44,23 @@ class SurveillanceServiceModule(reactContext: ReactApplicationContext) :
     DetectionNotifier.openChannelSettings(reactApplicationContext)
   }
 
+  /**
+   * Off the calling thread on purpose: this opens and parses the container to
+   * decode one frame, and the JS thread it is called from is the one about to
+   * file the event.
+   *
+   * Never rejects. A clip with no readable frame resolves to "", and the card
+   * keeps the placeholder it already draws for a clip recorded screen-off.
+   */
+  override fun extractThumbnail(clipPath: String, promise: Promise) {
+    thumbnails.execute { promise.resolve(ClipThumbnail.extract(clipPath)) }
+  }
+
   companion object {
     const val NAME = "SurveillanceService"
+
+    // One thread, shared: clips are filed one at a time, and a pool would only
+    // let several decodes compete for memory on the phone doing the watching.
+    private val thumbnails = Executors.newSingleThreadExecutor()
   }
 }

@@ -9,7 +9,7 @@ pas de télémétrie. Le code est commenté en anglais, l'interface est en fran�
 ```bash
 npm ci                 # les tests et le typecheck en dépendent
 npm run typecheck      # tsc --noEmit
-npm run lint           # eslint (0 erreur attendu ; 36 avertissements no-inline-styles connus)
+npm run lint           # eslint (0 erreur attendu ; 33 avertissements no-inline-styles connus)
 npm test               # jest
 npm run android        # build + déploiement sur un appareil ou un émulateur
 ```
@@ -366,6 +366,59 @@ chemin `file://`, qu'Android refuse d'une app à l'autre depuis l'API 24. La
 racine déclarée dans `res/xml/file_paths.xml` est exactement le dossier des
 enregistrements : l'élargir ferait la différence entre partager un clip et
 exposer tout le stockage privé de l'application.
+
+**Une vignette qui existe aussi écran éteint.** `takeSnapshot` capture la vue
+d'aperçu — c'est ce qui lui permet de ne toucher ni l'encodeur ni la session de
+capture, et c'est le bon compromis. Son prix est écrit à côté de l'appel : il
+n'y a pas d'aperçu à capturer écran éteint, ce qui est l'essentiel de la vie
+d'un téléphone de surveillance. L'historique redevenait donc des lignes
+identiques précisément pour les passages que personne n'a vus en direct — ceux
+pour lesquels il existe. Le repli lit le fichier : le clip est sur le disque à
+ce moment-là, et un décodeur se moque de l'état de l'écran. Trois règles
+tiennent le tout : il n'est demandé **que** si le snapshot est revenu vide (une
+image par clip, pas deux) ; **après** le renommage, donc le JPEG porte le nom
+final et `eventFiles` supprime la paire par nom ; et l'évènement ne l'attend
+jamais — un décodage sans réponse ne doit pas coûter un enregistrement, la même
+règle qu'`onClipAbandoned`.
+
+**Le splash ne ralentit plus le lancement.** Il était maintenu 1600 ms au-delà
+de l'hydratation « pour que sa barre de progression se lise comme un vrai retour
+plutôt qu'un flash » — c'est-à-dire qu'on ralentissait le démarrage pour rendre
+une décoration crédible. `resumeOnLaunch` remet la caméra au travail à
+l'ouverture, donc ces millisecondes sont du temps où personne n'est filmé, payé
+sur un écran qui ne rapporte rien. La barre est devenue indéterminée (ce qu'une
+attente à deux états a toujours été : il n'y a pas de pourcentage à montrer) et
+le maintien tombe à 250 ms. Le test mesure le temps écoulé, pas la constante :
+un test qui avance de la constante qu'il vérifie passe à n'importe quelle valeur.
+
+**Deux couleurs de la palette ne sont pas celles du design system.** Telles que
+fournies, `neutral600` donnait 3,5:1 au texte secondaire de 11 pt et
+`neutral700` 2,7:1 aux bordures d'interrupteur — sous AA dans un cas, sous le
+3:1 exigé d'un contrôle dans l'autre. Rien de tout ça ne se voit sur une
+capture, dans une pièce sombre, sur un bon écran : ça se voit sur un téléphone
+posé sur un rebord de fenêtre en plein jour, et dans le rapport de pré-lancement
+de Play. `__tests__/contrast.test.ts` calcule les ratios contre **les fonds sur
+lesquels le texte est réellement dessiné** — il y en a trois — et la liste des
+paires est un registre de décisions comme la liste des licences. Corollaire :
+`neutral700` n'est pas une couleur de texte, et le message de veille du viseur,
+qui l'utilisait, est passé à `neutral500` — c'est le seul texte à l'écran quand
+l'application ne fonctionne pas.
+
+**Un bouton qui dessine quelque chose doit montrer qu'on l'a pressé.**
+`OutlineButton` le faisait depuis toujours et rien d'autre — y compris le bouton
+pour lequel toute l'application existe. Sur un téléphone qu'on tape sans le
+regarder, un contrôle qui ne réagit qu'une fois son état changé se lit comme un
+appui manqué, et le deuxième appui défait le premier. Le ripple d'Android ne
+rattrape rien ici : ce sont des `Pressable` stylés comme des vues.
+`__tests__/touchFeedback.test.ts` lit la source plutôt qu'un rendu — `style` est
+une fonction, React la résout, et le nœud hôte ne porte que le résultat de
+l'état où il se trouvait. La règle porte ses propres exemptions : un `Pressable`
+**avec enfants** dessine quelque chose, donc il doit un retour *et* un rôle ; un
+`Pressable` sans enfant est un fond de scène ou une couche de rejet, invisible
+par construction. Le seul rôle dispensé de retour est `switch`, dont le bouton
+glisse — c'est le retour. Une seule vibration existe dans l'application, sur
+démarrage/arrêt de la surveillance, et elle coûte `VIBRATE` au manifeste :
+`src/utils/haptics.ts` est toute la justification de cette ligne.
 
 **Un clip sans événement est une vidéo perdue.** Le sort d'un enregistrement est
 exhaustif (`clipOutcome`) : rattaché, gardé comme événement sans fichier, ou

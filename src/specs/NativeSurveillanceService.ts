@@ -36,6 +36,20 @@ export interface Spec extends TurboModule {
   shareRecording(path: string): boolean;
 
   /**
+   * Decodes a still from `clipPath` and writes it beside the clip, resolving
+   * with the JPEG's path or '' when there was no readable frame.
+   *
+   * The backstop for the case `takeSnapshot` cannot cover: a snapshot is a
+   * screenshot of the preview view, and there is no preview to screenshot with
+   * the screen off — which is most of what a surveillance phone does. This
+   * reads the file instead, so it works whatever the screen was doing.
+   *
+   * A promise: it opens and parses the container. It never rejects, because a
+   * clip with no picture is a state the history already draws.
+   */
+  extractThumbnail(clipPath: string): Promise<string>;
+
+  /**
    * Opens Android's own settings page for the detection channel. Since Android
    * 8 the platform — not the app — owns whether a channel makes sound or
    * vibrates, so this is the only honest place to send someone who wants to

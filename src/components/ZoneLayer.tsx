@@ -126,7 +126,7 @@ export function ZoneLayer({ viewWidth, viewHeight }: { viewWidth: number; viewHe
         </Text>
         <View style={styles.editorButtons}>
           <Pressable
-            style={styles.editorButton}
+            style={({ pressed }) => [styles.editorButton, pressed && styles.editorButtonPressed]}
             accessibilityRole="button"
             accessibilityLabel={t('zone.cancel')}
             onPress={cancelZoneEdit}
@@ -134,7 +134,7 @@ export function ZoneLayer({ viewWidth, viewHeight }: { viewWidth: number; viewHe
             <Text style={styles.editorButtonText}>{t('zone.cancel')}</Text>
           </Pressable>
           <Pressable
-            style={styles.editorButton}
+            style={({ pressed }) => [styles.editorButton, pressed && styles.editorButtonPressed]}
             accessibilityRole="button"
             accessibilityLabel={t('zone.all')}
             onPress={() => saveZone(null)}
@@ -142,7 +142,10 @@ export function ZoneLayer({ viewWidth, viewHeight }: { viewWidth: number; viewHe
             <Text style={styles.editorButtonText}>{t('zone.all')}</Text>
           </Pressable>
           <Pressable
-            style={[styles.editorButton, styles.editorButtonPrimary, !usable && styles.editorButtonOff]}
+            style={({ pressed }) => [
+              styles.editorButton, styles.editorButtonPrimary,
+              !usable && styles.editorButtonOff, pressed && usable && styles.editorButtonPressed,
+            ]}
             accessibilityRole="button"
             accessibilityState={{ disabled: !usable }}
             accessibilityLabel={t('zone.save')}
@@ -221,6 +224,9 @@ const styles = StyleSheet.create({
   },
   editorButtonOff: {
     opacity: 0.45,
+  },
+  editorButtonPressed: {
+    opacity: 0.62,
   },
   editorButtonText: {
     fontFamily: font.medium,

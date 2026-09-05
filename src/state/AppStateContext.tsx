@@ -14,6 +14,7 @@ import {
 import { dropStaleKeys, EMPTY_STORED_SIZE, storage, StoredSize } from './storage';
 import { useForeground } from './useForeground';
 import { useLatest } from '../utils/useLatest';
+import { confirmTap } from '../utils/haptics';
 import { FrameDetection } from '../ml/types';
 import { confirmedTracksIfChanged, primaryTrack, Track, updateTracks } from '../ml/tracker';
 import { trackerOptionsFor } from '../ml/sensitivity';
@@ -27,7 +28,7 @@ import {
   deleteFiles, orphanedRecordings, renameRecording, volumeSpace,
 } from '../recording/videoStore';
 import {
-  dismissDetectionAlert, foregroundServiceError, hasNotificationPermission, notifyDetection,
+  dismissDetectionAlert, extractThumbnail, foregroundServiceError, hasNotificationPermission, notifyDetection,
   openAppSettings, openDetectionChannelSettings, requestNotificationPermission,
   startForegroundService, stopForegroundService,
 } from '../surveillance/foregroundService';
@@ -578,6 +579,26 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       },
       ...evs,
     ]);
+    return id;
+  }, []);
+
+  /**
+   * Puts a still on an event that was filed without one.
+   *
+   * Separate from `commitEvent` because it lands later and may not land at all:
+   * the event is the record, the picture is what makes the list usable.
+   */
+  const attachThumbnail = useCallback((id: number, thumbPath: string) => {
+    setEvents(evs => {
+      // The event may be gone — deleted, or reclaimed by the retention sweep,
+      // while the frame was being decoded. `map` could not revive it either
+      // way; what this avoids is the *new array*, which is a re-render of the
+      // history and a rewrite of the whole journal to AsyncStorage for a change
+      // that did not happen. The still it belonged to is left to the next disk
+      // sweep, which is what reclaims a file no event claims.
+      if (!evs.some(e => e.id === id)) return evs;
+      return evs.map(e => (e.id === id ? { ...e, thumbPath } : e));
+    });
   }, []);
 
   const clearSession = useCallback(() => {
@@ -650,11 +671,23 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         if (!pending) clearSession();
         const at = Date.now();
         renameRecording(clip.path, clipFileName(meta!.kind, at)).then(path => {
-          commitEvent(meta!.kind, meta!.dur, meta!.conf, { ...clip, path }, at);
+          const id = commitEvent(meta!.kind, meta!.dur, meta!.conf, { ...clip, path }, at);
+          // The snapshot taken as the clip opened is the better picture — it is
+          // the frame that says why the clip exists — but it needs a preview to
+          // screenshot, and there is none with the screen off. That is most of
+          // what a surveillance phone does, so those clips fall back to reading
+          // the file, which does not care what the screen was doing.
+          //
+          // Deliberately after the rename and deliberately not awaited: the
+          // still is written beside the clip's *final* path, so `eventFiles`
+          // deletes the pair by name, and an event never waits on a decode.
+          if (clip.thumbPath == null) {
+            extractThumbnail(path).then(thumb => { if (thumb) attachThumbnail(id, thumb); });
+          }
         });
       }
     }
-  }, [clearSession, commitEvent, sessionMeta]);
+  }, [attachThumbnail, clearSession, commitEvent, sessionMeta]);
 
   /**
    * The encoder has released the camera. If the cap cut this clip with the
@@ -868,6 +901,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   }, [cancelPostRoll, endSession, foregroundRef, hasRoomToRecord, settingsRef, startRecording, zoneEditingRef]);
 
   const toggleMonitoring = useCallback(() => {
+    // Felt, not just seen: this is the action a phone is propped up and left
+    // for, and the one most often taken without looking at the screen. Fired
+    // here rather than in the button so it follows the action itself — the
+    // permission path below can end without any state change, and a tick that
+    // said "started" there would be a lie.
+    confirmTap();
     // Closing the session has to happen outside the updater: React may invoke
     // an updater twice, which would commit the same event — and its clip — twice.
     if (monitoring) {

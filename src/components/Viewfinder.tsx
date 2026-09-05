@@ -271,18 +271,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     transform: [{ translateY: -12 }],
   },
+  // The standby message is the only thing on screen when the app is not
+  // working — "grant the camera", "no camera". It was drawn in `neutral700`,
+  // which is 2.69:1 against its own gradient: below AA for large text, let
+  // alone for 10 pt. It is information, not decoration, so it takes a text
+  // colour.
   placeholderText: {
     fontFamily: font.regular,
     fontSize: 10,
     letterSpacing: 2.2,
-    color: color.neutral700,
+    color: color.neutral500,
     textAlign: 'center',
   },
   placeholderSubtext: {
     fontFamily: font.regular,
     fontSize: 9,
     letterSpacing: 0.4,
-    color: color.neutral700,
+    color: color.neutral500,
     textAlign: 'center',
     marginTop: 4,
   },

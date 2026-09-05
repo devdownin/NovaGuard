@@ -25,6 +25,9 @@ export const notifyDetection = jest.fn();
 export const dismissDetectionAlert = jest.fn();
 export const openDetectionChannelSettings = jest.fn();
 export const shareRecording = jest.fn(() => true);
+// Null by default: no native side under Jest, which is also what a device with
+// an undecodable clip answers. A suite that cares hands back a path.
+export const extractThumbnail = jest.fn<Promise<string | null>, [string]>(async () => null);
 export const requestNotificationPermission = jest.fn<Promise<PermissionOutcome>, []>(
   async () => 'denied',
 );

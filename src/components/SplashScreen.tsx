@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Image, StyleSheet, Text, View } from 'react-native';
 import { color, font } from '../theme';
 import { t } from '../i18n';
@@ -8,8 +8,29 @@ import {
 
 const HOUSE_IMAGE = require('../../assets/splash/house-night.png');
 
-/** How long the progress bar takes to fill — App.tsx keeps the splash mounted at least this long. */
-export const SPLASH_MIN_DURATION_MS = 1600;
+/**
+ * How long the splash is held past hydration, to keep it from flashing.
+ *
+ * It was 1600 ms, and the reason given was that the progress bar should "read
+ * as real feedback instead of a flash" — that is, the launch was slowed down so
+ * a decoration would look credible. On a surveillance app that is not a
+ * cosmetic cost: `resumeOnLaunch` puts the camera back to work when the app is
+ * opened, so every one of those milliseconds is time nobody is being filmed,
+ * paid on a screen that reports nothing.
+ *
+ * 250 ms is what it takes for a splash that appears and leaves to read as one
+ * step rather than a glitch, and nothing more. The bar it carries is now
+ * indeterminate, which is what a wait with two states — loading, loaded — has
+ * always been: there is no percentage to show, and pretending otherwise is the
+ * same fabrication as the seven seeded events this repo has already removed.
+ */
+export const SPLASH_MIN_DURATION_MS = 250;
+
+/** One sweep of the indeterminate bar. */
+const SWEEP_MS = 900;
+
+/** How much of the track the moving segment covers. */
+const SEGMENT_FRACTION = 0.35;
 
 function Pulse({ children, minOpacity = 0.35, size = 1.08, duration = 1400 }: {
   children: React.ReactNode; minOpacity?: number; size?: number; duration?: number;
@@ -65,17 +86,24 @@ function FeatureItem({ Icon, label, sub }: { Icon: typeof CameraIcon; label: str
 }
 
 export function SplashScreen() {
-  const progress = useRef(new Animated.Value(0)).current;
+  const sweep = useRef(new Animated.Value(0)).current;
+  // The track's own width, measured: a transform cannot take a percentage, and
+  // this animation runs on the native driver precisely so the launch it sits on
+  // top of is not sharing the JS thread with it.
+  const [trackWidth, setTrackWidth] = useState(0);
 
   useEffect(() => {
-    Animated.timing(progress, {
-      toValue: 1,
-      duration: SPLASH_MIN_DURATION_MS,
-      useNativeDriver: false,
-    }).start();
-  }, [progress]);
+    const loop = Animated.loop(
+      Animated.timing(sweep, { toValue: 1, duration: SWEEP_MS, useNativeDriver: true }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [sweep]);
 
-  const progressWidth = progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
+  const translateX = sweep.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-SEGMENT_FRACTION * trackWidth, trackWidth],
+  });
 
   return (
     <View style={styles.root}>
@@ -134,8 +162,16 @@ export function SplashScreen() {
 
       <View style={styles.footer}>
         <Text style={styles.footerText}>{t('splash.loading')}</Text>
-        <View style={styles.progressTrack}>
-          <Animated.View style={[styles.progressFill, { width: progressWidth }]} />
+        <View
+          style={styles.progressTrack}
+          onLayout={e => setTrackWidth(e.nativeEvent.layout.width)}
+        >
+          <Animated.View
+            style={[
+              styles.progressFill,
+              { width: trackWidth * SEGMENT_FRACTION, transform: [{ translateX }] },
+            ]}
+          />
         </View>
       </View>
     </View>

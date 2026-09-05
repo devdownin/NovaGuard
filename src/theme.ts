@@ -1,6 +1,13 @@
 // Design tokens ported from the Nocturne design system
 // (_ds/nocturne-4a4cdbd3-a425-47a5-9092-d76ee9fd6dc3/styles.css)
 // Keep these in sync with that source if the design system is retuned.
+//
+// Two of the neutrals are deliberately *not* the design system's values, and
+// `__tests__/contrast.test.ts` is what holds them there: as shipped they put
+// this app's secondary text below WCAG AA on its own background — 3.5:1 for
+// 11 pt text — and its switch borders below the 3:1 that a non-text control
+// needs. The numbers are asserted against the grounds they are actually drawn
+// on, so a retune that reintroduces the problem fails rather than ships.
 
 export const color = {
   bg: '#161826',
@@ -15,8 +22,12 @@ export const color = {
   neutral300: '#cfd3e5',
   neutral400: '#b2b6ca',
   neutral500: '#9397ab',
-  neutral600: '#75798c',
-  neutral700: '#595d6c',
+  // #75798c in the source: 3.52:1 on `surface`, and it carries most of the
+  // app's 9.5–11 pt secondary text.
+  neutral600: '#888b9c',
+  // #595d6c in the source: 2.69:1, below the 3:1 a border or a handle needs.
+  // Text is not its job — see the note on `neutral500` uses in `Viewfinder`.
+  neutral700: '#6a6e80',
   neutral800: '#3f424d',
   neutral900: '#292b31',
 

@@ -29,7 +29,8 @@ export function SegmentedControl<T extends string>({
             onPress={() => onChange(opt.value)}
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
-            style={[
+            style={({ pressed }) => [
+              pressed && { opacity: 0.62 },
               styles.segment,
               {
                 paddingVertical,
