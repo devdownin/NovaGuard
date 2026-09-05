@@ -28,6 +28,8 @@
  * calls, not a certified count of lost footage.
  */
 
+import { t, tn } from '../i18n';
+
 export interface ClipGap {
   /** ms the encoder took to close the finished file. VisionCamera's to answer for. */
   finalizeMs: number;
@@ -77,13 +79,13 @@ export function meanGapMs(stats: ClipGapStats): number {
 }
 
 function ms(value: number): string {
-  if (value >= 1000) return (value / 1000).toFixed(2).replace('.', ',') + ' s';
+  if (value >= 1000) return (value / 1000).toFixed(2).replace('.', t('number.decimal')) + ' s';
   return Math.round(value) + ' ms';
 }
 
 /** The headline figure: the mean, which is what "the gap" means in practice. */
 export function formatClipGap(stats: ClipGapStats): string {
-  if (stats.samples === 0) return 'Pas encore mesuré';
+  if (stats.samples === 0) return t('clipGap.none');
   return ms(meanGapMs(stats));
 }
 
@@ -93,9 +95,12 @@ export function formatClipGap(stats: ClipGapStats): string {
  */
 export function describeClipGap(stats: ClipGapStats): string | undefined {
   if (stats.samples === 0 || !stats.last) {
-    return 'Filmez un passage plus long que la durée max. par clip pour obtenir une mesure';
+    return t('clipGap.tooShort');
   }
-  const cuts = stats.samples === 1 ? '1 coupure' : `${stats.samples} coupures`;
-  return `${cuts} · pire ${ms(stats.worstMs)} · dernière : `
-    + `${ms(stats.last.finalizeMs)} de finalisation + ${ms(stats.last.restartMs)} de relance`;
+  return t('clipGap.detail', {
+    cuts: tn('clipGap.cuts.other', stats.samples),
+    worst: ms(stats.worstMs),
+    finalize: ms(stats.last.finalizeMs),
+    restart: ms(stats.last.restartMs),
+  });
 }

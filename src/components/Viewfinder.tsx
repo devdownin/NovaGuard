@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
-import { color, font } from '../theme';
+import { color, font, MAX_FONT_SCALE } from '../theme';
 import { useAppState, useViewfinderState } from '../state/AppStateContext';
 import { useAutoZoom } from '../camera/useAutoZoom';
 import { formatDuration } from '../utils/date';
@@ -10,6 +10,7 @@ import { GridOverlay } from './GridOverlay';
 import { CameraFeed } from './CameraFeed';
 import { DetectionOverlay } from './DetectionOverlay';
 import { LiveClock } from './LiveClock';
+import { t } from '../i18n';
 
 const BEAM_HEIGHT = 70;
 
@@ -48,7 +49,7 @@ function ScanBeam({ height }: { height: number }) {
  */
 function RecTimer() {
   const { recSec } = useViewfinderState();
-  return <Text style={styles.recClock}>{formatDuration(recSec)}</Text>;
+  return <Text style={styles.recClock} maxFontSizeMultiplier={MAX_FONT_SCALE}>{formatDuration(recSec)}</Text>;
 }
 
 /**
@@ -62,7 +63,7 @@ function RecTimer() {
 function FrameRateLabel() {
   const { frameRate } = useViewfinderState();
   if (frameRate <= 0) return null;
-  return <Text style={styles.overlayRate}>{formatFrameRate(frameRate)}</Text>;
+  return <Text style={styles.overlayRate} maxFontSizeMultiplier={MAX_FONT_SCALE}>{formatFrameRate(frameRate)}</Text>;
 }
 
 function RecDot() {
@@ -107,16 +108,16 @@ export function Viewfinder() {
     maxCameraZoom,
   });
 
-  const standbyLabel = !perms.cam
-    ? 'AUTORISEZ LA CAMÉRA'
+  const standbyLabel = t(!perms.cam
+    ? 'view.grantCamera'
     : monitoring
-      ? 'AUCUNE CAMÉRA DÉTECTÉE'
-      : 'CAMÉRA EN VEILLE';
-  const standbySubtext = !perms.cam ? 'Setup → Confidentialité → Permissions' : undefined;
+      ? 'view.noCamera'
+      : 'view.standby');
+  const standbySubtext = !perms.cam ? t('view.grantCameraWhere') : undefined;
 
-  const overlayText = det
-    ? det === 'Personne' ? 'Personne détectée · enregistrement' : 'Animal détecté · enregistrement'
-    : monitoring ? 'Aucune détection' : 'Caméra en veille';
+  const overlayText = t(det
+    ? det === 'Personne' ? 'view.overlay.person' : 'view.overlay.animal'
+    : monitoring ? 'view.overlay.none' : 'view.overlay.idle');
   const overlayDotColor = det ? color.accent : color.neutral600;
 
   return (
@@ -176,9 +177,11 @@ export function Viewfinder() {
 
       {monitoring && size.height > 0 && <ScanBeam height={size.height} />}
 
-      <View style={styles.overlayChip}>
+      {/* Announced when it changes: on a surveillance app, "someone is in
+          frame" is the one thing worth interrupting a screen-reader user for. */}
+      <View style={styles.overlayChip} accessible accessibilityLiveRegion="polite">
         <View style={[styles.overlayDot, { backgroundColor: overlayDotColor }]} />
-        <Text style={styles.overlayText}>{overlayText}</Text>
+        <Text style={styles.overlayText} maxFontSizeMultiplier={MAX_FONT_SCALE}>{overlayText}</Text>
         {/* "Sensibilité" sets a target the device does not have to reach; this
             is the only place the difference is visible. */}
         {monitoring && <FrameRateLabel />}
@@ -187,15 +190,15 @@ export function Viewfinder() {
       {recording && (
         <View style={styles.recChip}>
           <RecDot />
-          <Text style={styles.recLabel}>REC</Text>
+          <Text style={styles.recLabel} maxFontSizeMultiplier={MAX_FONT_SCALE}>REC</Text>
           <RecTimer />
         </View>
       )}
 
       {autoZoom.phase !== 'idle' && (
         <View style={styles.zoomChip}>
-          <Text style={styles.zoomChipText}>
-            {autoZoom.phase === 'close' ? 'PLAN SERRÉ' : 'PLAN LARGE'}
+          <Text style={styles.zoomChipText} maxFontSizeMultiplier={MAX_FONT_SCALE}>
+            {t(autoZoom.phase === 'close' ? 'view.zoom.close' : 'view.zoom.wide')}
           </Text>
         </View>
       )}

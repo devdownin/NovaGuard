@@ -18,6 +18,7 @@ import { OnboardingModal } from './src/components/OnboardingModal';
 import { ConfirmDialog } from './src/components/ConfirmDialog';
 import { SplashScreen, SPLASH_MIN_DURATION_MS } from './src/components/SplashScreen';
 import { useLandscape } from './src/utils/useLandscape';
+import { t, tn } from './src/i18n';
 
 function AppShell() {
   const {
@@ -30,8 +31,8 @@ function AppShell() {
   // real feedback instead of a flash, even when hydration itself is instant.
   const [minDurationElapsed, setMinDurationElapsed] = useState(false);
   useEffect(() => {
-    const t = setTimeout(() => setMinDurationElapsed(true), SPLASH_MIN_DURATION_MS);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setMinDurationElapsed(true), SPLASH_MIN_DURATION_MS);
+    return () => clearTimeout(timer);
   }, []);
 
   if (!hydrated || !minDurationElapsed) {
@@ -56,17 +57,17 @@ function AppShell() {
 
       <ConfirmDialog
         visible={confirmDelete}
-        title="Supprimer cette vidéo ?"
-        body="La vidéo sera définitivement supprimée de votre appareil. Cette action est irréversible."
-        confirmLabel="Supprimer"
+        title={t('confirm.delete.title')}
+        body={t('confirm.delete.body')}
+        confirmLabel={t('confirm.delete.ok')}
         onCancel={cancelDelete}
         onConfirm={doDelete}
       />
       <ConfirmDialog
         visible={confirmWipe}
-        title="Supprimer toutes les vidéos ?"
-        body={`${events.length} vidéos seront supprimées de cet appareil. Cette action est irréversible.`}
-        confirmLabel="Tout supprimer"
+        title={t('confirm.wipe.title')}
+        body={tn('confirm.wipe.body.other', events.length)}
+        confirmLabel={t('confirm.wipe.ok')}
         onCancel={cancelWipe}
         onConfirm={doWipe}
       />

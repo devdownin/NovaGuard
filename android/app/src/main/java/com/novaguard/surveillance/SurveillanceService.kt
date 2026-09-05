@@ -44,7 +44,7 @@ class SurveillanceService : Service() {
     // held at the moment it starts; without it startForeground throws
     // SecurityException. Refusing here turns a crash into a message.
     if (!hasPermission(Manifest.permission.CAMERA)) {
-      failAndStop("Permission caméra requise pour la surveillance en arrière-plan")
+      failAndStop(getString(R.string.camera_permission_required))
       return START_NOT_STICKY
     }
 

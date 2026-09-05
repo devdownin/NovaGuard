@@ -5,23 +5,12 @@ import { color, font, radius, shadow } from '../theme';
 import { useAppState } from '../state/AppStateContext';
 import { Permissions } from '../state/types';
 import { SolidAccentButton } from './OutlineButton';
+import { StringKey, t } from '../i18n';
 
-const STEPS = [
-  {
-    n: '1',
-    title: 'Détection locale',
-    body: 'Les personnes et les animaux sont reconnus directement sur l’appareil.',
-  },
-  {
-    n: '2',
-    title: 'Enregistrement automatique',
-    body: 'La vidéo démarre dès qu’une détection est confirmée.',
-  },
-  {
-    n: '3',
-    title: 'Vidéos conservées localement',
-    body: 'Rien ne quitte votre téléphone, aucun compte n’est requis.',
-  },
+const STEPS: { n: string; title: StringKey; body: StringKey }[] = [
+  { n: '1', title: 'onb.step1', body: 'onb.step1.body' },
+  { n: '2', title: 'onb.step2', body: 'onb.step2.body' },
+  { n: '3', title: 'onb.step3', body: 'onb.step3.body' },
 ];
 
 export function OnboardingModal() {
@@ -32,14 +21,14 @@ export function OnboardingModal() {
   const permRows: {
     key: keyof Permissions; label: string; note: string; enabled: boolean;
   }[] = [
-    { key: 'cam', label: 'Caméra', note: 'Indispensable à la surveillance', enabled: true },
+    { key: 'cam', label: t('info.perm.cam'), note: t('onb.perm.cam.note'), enabled: true },
     // Both optional permissions unlock together, on the camera. Chaining
     // notifications behind the microphone contradicted the line right above
     // them — refusing the mic, which this screen invites, left the alerts of a
     // surveillance app permanently out of reach, and nothing else in the app
     // asks for them.
-    { key: 'mic', label: 'Microphone', note: 'Son des enregistrements', enabled: perms.cam },
-    { key: 'notif', label: 'Notifications', note: "Alerte lors d'une détection", enabled: perms.cam },
+    { key: 'mic', label: t('info.perm.mic'), note: t('onb.perm.mic.note'), enabled: perms.cam },
+    { key: 'notif', label: t('info.perm.notif'), note: t('onb.perm.notif.note'), enabled: perms.cam },
   ];
 
   const blocked = !perms.cam;
@@ -59,8 +48,8 @@ export function OnboardingModal() {
         >
           {onb === 'intro' && (
             <View>
-              <Text style={styles.kicker}>BIENVENUE</Text>
-              <Text style={styles.headline}>NovaGuard transforme{'\n'}ce téléphone en caméra.</Text>
+              <Text style={styles.kicker}>{t('onb.welcome')}</Text>
+              <Text style={styles.headline}>{t('onb.headline')}</Text>
               <View style={{ gap: 14 }}>
                 {STEPS.map(step => (
                   <View key={step.n} style={styles.stepRow}>
@@ -68,23 +57,21 @@ export function OnboardingModal() {
                       <Text style={styles.stepBadgeText}>{step.n}</Text>
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.stepTitle}>{step.title}</Text>
-                      <Text style={styles.stepBody}>{step.body}</Text>
+                      <Text style={styles.stepTitle}>{t(step.title)}</Text>
+                      <Text style={styles.stepBody}>{t(step.body)}</Text>
                     </View>
                   </View>
                 ))}
               </View>
-              <SolidAccentButton label="CONTINUER" onPress={onbNext} style={{ width: '100%', marginTop: 22 }} />
+              <SolidAccentButton label={t('onb.continue')} onPress={onbNext} style={{ width: '100%', marginTop: 22 }} />
             </View>
           )}
 
           {onb === 'perms' && (
             <View>
-              <Text style={styles.kicker}>AUTORISATIONS</Text>
-              <Text style={styles.headlineSm}>Trois accès, demandés{'\n'}un par un.</Text>
-              <Text style={styles.subtext}>
-                Vous pouvez refuser la notification et le micro : la surveillance fonctionnera quand même.
-              </Text>
+              <Text style={styles.kicker}>{t('onb.perms')}</Text>
+              <Text style={styles.headlineSm}>{t('onb.perms.headline')}</Text>
+              <Text style={styles.subtext}>{t('onb.perms.sub')}</Text>
               <View style={{ gap: 8 }}>
                 {permRows.map(row => {
                   const granted = perms[row.key];
@@ -109,6 +96,11 @@ export function OnboardingModal() {
                         testID={`onb-${row.key}`}
                         onPress={() => grantPermission(row.key)}
                         disabled={disabled}
+                        accessibilityRole="button"
+                        // Three buttons reading "Autoriser" in a column say
+                        // nothing about which permission each one grants.
+                        accessibilityLabel={t('a11y.allow', { name: row.label })}
+                        accessibilityState={{ disabled }}
                         style={[
                           styles.permButton,
                           {
@@ -122,7 +114,7 @@ export function OnboardingModal() {
                             { color: granted ? color.accent300 : row.enabled ? color.accent : color.neutral600 },
                           ]}
                         >
-                          {granted ? 'Autorisé' : 'Autoriser'}
+                          {t(granted ? 'onb.granted' : 'onb.grant')}
                         </Text>
                       </Pressable>
                     </View>
@@ -130,7 +122,7 @@ export function OnboardingModal() {
                 })}
               </View>
               <SolidAccentButton
-                label={blocked ? "AUTORISER LA CAMÉRA D'ABORD" : 'COMMENCER'}
+                label={t(blocked ? 'onb.blocked' : 'onb.start')}
                 onPress={onbFinish}
                 disabled={blocked}
                 style={{ width: '100%', marginTop: 18 }}

@@ -5,6 +5,7 @@ import Video from 'react-native-video';
 import { color, font, radius } from '../theme';
 import { useAppState } from '../state/AppStateContext';
 import { formatBytes } from '../recording/library';
+import { t, tValue } from '../i18n';
 import { shareRecording } from '../surveillance/foregroundService';
 import { formatWhen } from '../utils/date';
 import { Sheet } from './Sheet';
@@ -63,7 +64,7 @@ export function VideoDetailSheet() {
                 style={styles.playButton}
                 onPress={() => setPlaying(true)}
                 accessibilityRole="button"
-                accessibilityLabel="Lire l'enregistrement"
+                accessibilityLabel={t('detail.play')}
               >
                 <PlayIcon size={16} color={color.accent} />
               </Pressable>
@@ -71,23 +72,23 @@ export function VideoDetailSheet() {
               // A sighting with no file: recording was refused, the disk was
               // full, or the clip has been reclaimed. Say so instead of showing
               // a play button that would do nothing.
-              <Text style={styles.noClip}>AUCUNE VIDÉO POUR CET ÉVÈNEMENT</Text>
+              <Text style={styles.noClip}>{t('detail.noClip')}</Text>
             )}
           </View>
 
           <View style={styles.titleRow}>
             <View style={styles.dot} />
-            <Text style={styles.title}>{event.kind === 'Personne' ? 'Personne détectée' : 'Animal détecté'}</Text>
+            <Text style={styles.title}>{t(event.kind === 'Personne' ? 'hist.event.person' : 'hist.event.animal')}</Text>
           </View>
 
           <View style={styles.grid}>
-            <StatCell label="Date & heure" value={formatWhen(event.timestamp)} />
-            <StatCell label="Type" value={event.kind} />
-            <StatCell label="Durée" value={`${event.dur} secondes`} />
-            <StatCell label="Confiance" value={`${event.conf} %`} accent />
-            <StatCell label="Taille" value={hasClip ? formatBytes(event.bytes) : '—'} />
+            <StatCell label={t('detail.when')} value={formatWhen(event.timestamp)} />
+            <StatCell label={t('detail.type')} value={tValue(`value.kind.${event.kind}`)} />
+            <StatCell label={t('detail.duration')} value={t('detail.seconds', { dur: event.dur })} />
+            <StatCell label={t('detail.confidence')} value={t('detail.percent', { value: event.conf })} accent />
+            <StatCell label={t('detail.size')} value={hasClip ? formatBytes(event.bytes) : '—'} />
             <StatCell
-              label="Fichier"
+              label={t('detail.file')}
               value={hasClip ? event.path!.split('/').pop()! : 'Aucun'}
               small
             />
@@ -101,10 +102,10 @@ export function VideoDetailSheet() {
 
           <View style={styles.actions}>
             {hasClip && (
-              <PrimaryOutlineButton label="Partager" onPress={share} style={styles.action} />
+              <PrimaryOutlineButton label={t('detail.share')} onPress={share} style={styles.action} />
             )}
-            <SecondaryOutlineButton label="Supprimer" onPress={askDelete} style={styles.action} />
-            <TextButton label="Fermer" onPress={close} style={styles.action} />
+            <SecondaryOutlineButton label={t('detail.delete')} onPress={askDelete} style={styles.action} />
+            <TextButton label={t('detail.close')} onPress={close} style={styles.action} />
           </View>
         </View>
       )}

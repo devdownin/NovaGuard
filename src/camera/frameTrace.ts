@@ -20,7 +20,7 @@
  * one worth naming, and the one a user can neither see nor report.
  */
 
-import { FRAME_ERROR_PREFIX } from './frameErrors';
+import { StringKey, t } from '../i18n';
 
 /**
  * The native steps surveillance goes through, in the order it takes them.
@@ -49,25 +49,26 @@ export function isCompleteFrame(stage: FrameStage | null): boolean {
   return stage === FRAME_STAGES[FRAME_STAGES.length - 1];
 }
 
-const BLAME: Record<FrameStage, string> = {
-  camera: 'l’ouverture de la caméra',
-  resize: 'la mise à l’échelle de l’image',
-  inference: 'la détection (modèle)',
-  faces: 'la détection de visages',
-  report: 'la remontée des résultats',
+const BLAME: Record<FrameStage, StringKey> = {
+  camera: 'stage.camera',
+  resize: 'stage.resize',
+  inference: 'stage.inference',
+  faces: 'stage.faces',
+  report: 'stage.report',
 };
 
 /**
  * What to tell the user about a session that never came back.
  *
- * Built on `FRAME_ERROR_PREFIX` rather than spelling the word out, because
- * `reportCameraProblem` clears only messages starting with it: a diagnosis
- * worded past that match would sit in the viewfinder for the rest of the
- * session, long after a frame proved the camera can get through one.
+ * Worded so it starts with `error.prefix.frame`, because `reportCameraProblem`
+ * clears only messages beginning with it: a diagnosis worded past that match
+ * would sit in the viewfinder for the rest of the session, long after a frame
+ * proved the camera can get through one. That coupling is why the prefixes live
+ * in the catalogue, next to the sentences built on them.
  */
 export function stageDiagnosis(stage: FrameStage | null): string | null {
   if (stage == null || isCompleteFrame(stage)) return null;
-  return `${FRAME_ERROR_PREFIX} d’image interrompue pendant ${BLAME[stage]}`;
+  return t('error.frame.duringStage', { stage: t(BLAME[stage]) });
 }
 
 /** Parses a persisted stage, rejecting anything a older or corrupt build wrote. */

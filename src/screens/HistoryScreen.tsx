@@ -7,11 +7,14 @@ import { SegmentedControl } from '../components/SegmentedControl';
 import { PeriodDropdown } from '../components/PeriodDropdown';
 import { EventCard } from '../components/EventCard';
 import { useLandscape } from '../utils/useLandscape';
+import { t, tn } from '../i18n';
 
+// The values are the stored identifiers, which stay French; only the labels
+// are translated. See the note at the end of `i18n/fr.ts`.
 const FILTER_OPTIONS: { label: string; value: HistoryFilter }[] = [
-  { label: 'Toutes', value: 'Toutes' },
-  { label: 'Personnes', value: 'Personnes' },
-  { label: 'Animaux', value: 'Animaux' },
+  { label: t('value.filter.Toutes'), value: 'Toutes' },
+  { label: t('value.filter.Personnes'), value: 'Personnes' },
+  { label: t('value.filter.Animaux'), value: 'Animaux' },
 ];
 
 function ItemSeparator() {
@@ -28,8 +31,8 @@ export function HistoryScreen() {
   return (
     <View style={styles.screen}>
       <View style={styles.header}>
-        <Text style={styles.title}>Historique</Text>
-        <Text style={styles.count}>{shown.length} vidéos</Text>
+        <Text style={styles.title}>{t('hist.title')}</Text>
+        <Text style={styles.count}>{tn('hist.count.other', shown.length)}</Text>
       </View>
 
       <View style={styles.filters}>
@@ -62,7 +65,7 @@ export function HistoryScreen() {
         )}
         ItemSeparatorComponent={ItemSeparator}
         ListEmptyComponent={
-          <Text style={styles.empty}>Aucun événement pour ce filtre.</Text>
+          <Text style={styles.empty}>{t('hist.empty')}</Text>
         }
       />
     </View>

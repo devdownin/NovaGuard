@@ -1,6 +1,7 @@
 import { Linking, PermissionsAndroid } from 'react-native';
 import NativeSurveillanceService from '../specs/NativeSurveillanceService';
 import { PermissionOutcome } from '../state/types';
+import { t } from '../i18n';
 
 /**
  * Thin wrapper over the native foreground service.
@@ -11,9 +12,9 @@ import { PermissionOutcome } from '../state/types';
  * can do, not a reason to take the app down.
  */
 
-export const NOTIFICATION_TITLE = 'Surveillance active';
+export const NOTIFICATION_TITLE = t('notif.title');
 export const NOTIFICATION_BODY =
-  'NovaGuard analyse la caméra. Tout reste sur cet appareil.';
+  t('notif.monitoring');
 
 export function startForegroundService(): boolean {
   if (!NativeSurveillanceService) return false;

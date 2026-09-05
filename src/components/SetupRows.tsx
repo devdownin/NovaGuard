@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { color, font } from '../theme';
+import { color, font, TOUCH_SLOP } from '../theme';
 
 export function SettingRow({
   label, subtitle, children,
@@ -21,11 +21,27 @@ export function StaticValue({ label }: { label: string }) {
 }
 
 export function ValueButton({
-  label, onPress, active = false, pill = false,
-}: { label: string; onPress: () => void; active?: boolean; pill?: boolean }) {
+  label, onPress, active = false, pill = false, accessibilityLabel,
+}: {
+  label: string;
+  onPress: () => void;
+  active?: boolean;
+  pill?: boolean;
+  /**
+   * What a screen reader announces, when the visible label does not stand on
+   * its own. "7 jours" says nothing without the row it belongs to; "Autoriser"
+   * says nothing when three of them sit in a column.
+   */
+  accessibilityLabel?: string;
+}) {
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ selected: !!active }}
+      // ~28 dp tall by design; the finger gets the 48 dp Android asks for.
+      hitSlop={TOUCH_SLOP}
       style={[
         styles.valueButton,
         pill && { borderRadius: 999, paddingVertical: 6, paddingHorizontal: 11 },
