@@ -36,7 +36,7 @@ const NOW = Date.now();
 const CLIP = '/data/user/0/com.novaguard/files/recordings/2026-09-04_18-20-11.mp4';
 
 const event = (id: number, path: string | null): DetectionEvent => ({
-  id, kind: 'Personne', timestamp: NOW, dur: 4, conf: 90, path, bytes: path ? 4_000_000 : 0,
+  id, kind: 'Personne', timestamp: NOW, dur: 4, conf: 90, path, bytes: path ? 4_000_000 : 0, thumbPath: null
 });
 
 const mounted: ReactTestRenderer.ReactTestRenderer[] = [];

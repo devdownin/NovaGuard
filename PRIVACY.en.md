@@ -20,6 +20,7 @@ produces stays on your phone.
 | Camera frames | On the device, in memory | Not kept as such | Nothing |
 | Detections (person / animal) | On the device, by a bundled model | Local history (`AsyncStorage`) | Nothing |
 | Recorded videos | On the device | The app's private folder | Nothing, unless you share one explicitly (see below) |
+| Video thumbnails | On the device | The app's private folder, deleted with their video | Nothing |
 | Sound (if the microphone is allowed) | On the device | In the audio track of the videos | Nothing |
 | Settings and counters | On the device | The app's local storage | Nothing |
 

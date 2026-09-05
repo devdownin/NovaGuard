@@ -243,6 +243,18 @@ export function nextEventId(latestId: number, now: number): number {
   return Math.max(now, latestId + 1);
 }
 
+/**
+ * Every file the given events own — clips and their stills.
+ *
+ * One place rather than four call sites listing `.path`: an event's files grew
+ * from one to two, and each deletion site that kept saying `.path` would have
+ * gone on leaving a still behind, invisible in the app and reclaimed by nothing
+ * but the launch sweep.
+ */
+export function eventFiles(events: DetectionEvent[]): (string | null)[] {
+  return events.flatMap(e => [e.path, e.thumbPath ?? null]);
+}
+
 export function totalBytes(events: DetectionEvent[]): number {
   return events.reduce((sum, e) => sum + (e.bytes > 0 ? e.bytes : 0), 0);
 }

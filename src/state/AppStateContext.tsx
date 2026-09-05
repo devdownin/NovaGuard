@@ -13,17 +13,16 @@ import {
 } from './defaults';
 import { dropStaleKeys, EMPTY_STORED_SIZE, storage, StoredSize } from './storage';
 import { useForeground } from './useForeground';
-import { pad } from '../utils/date';
 import { useLatest } from '../utils/useLatest';
 import { FrameDetection } from '../ml/types';
 import { confirmedTracksIfChanged, primaryTrack, Track, updateTracks } from '../ml/tracker';
 import { Clip, useRecorder } from '../recording/useRecorder';
 import {
-  bytesToReclaim, clipFileName, clipOutcome, eventsToReclaim, expiredEvents, lowSpaceBytes,
+  bytesToReclaim, clipFileName, clipOutcome, eventFiles, eventsToReclaim, expiredEvents, lowSpaceBytes,
   minFreeBytes, nextEventId, periodRange, postRollMs, sameDay, todayCount, totalBytes,
 } from '../recording/library';
 import {
-  deleteFile, deleteFiles, orphanedRecordings, renameRecording, volumeSpace,
+  deleteFiles, orphanedRecordings, renameRecording, volumeSpace,
 } from '../recording/videoStore';
 import {
   dismissDetectionAlert, foregroundServiceError, hasNotificationPermission, notifyDetection,
@@ -398,7 +397,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       // Clips left behind by a crash between the encoder closing a file and the
       // event being written would otherwise take up space nothing accounts for.
       if (storedEvents.ok) {
-        const orphans = await orphanedRecordings((ev ?? []).map(e => e.path));
+        // Both paths: the sweep deletes everything in the directory that no
+        // event claims, and a still is in there next to its clip.
+        const orphans = await orphanedRecordings(eventFiles(ev ?? []));
         if (orphans.length) await deleteFiles(orphans);
       }
       await dropStaleKeys();
@@ -555,6 +556,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         conf: c,
         path: clip ? clip.path : null,
         bytes: clip ? clip.bytes : 0,
+        thumbPath: clip ? clip.thumbPath : null,
       },
       ...evs,
     ]);
@@ -614,15 +616,15 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     switch (clipOutcome(meta != null, clip.bytes)) {
       case 'discard':
         // A stop that raced the session ending, or the component going away
-        // mid-clip. Nothing will ever point at this file.
-        deleteFile(clip.path);
+        // mid-clip. Nothing will ever point at these files.
+        deleteFiles([clip.path, clip.thumbPath]);
         return;
 
       case 'event-only':
         // The encoder produced an empty file. Keep the sighting, drop the husk:
         // an unplayable 0-byte row in the history is worse than none.
         if (!pending) clearSession();
-        deleteFile(clip.path);
+        deleteFiles([clip.path, clip.thumbPath]);
         commitEvent(meta!.kind, meta!.dur, meta!.conf, null);
         return;
 
@@ -903,7 +905,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
     let cancelled = false;
     const ids = new Set(expired.map(e => e.id));
-    deleteFiles(expired.map(e => e.path)).then(() => {
+    deleteFiles(eventFiles(expired)).then(() => {
       if (cancelled) return;
       setEvents(evs => evs.filter(e => !ids.has(e.id)));
       refreshVolume();
@@ -929,7 +931,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     const victims = eventsToReclaim(eventsRef.current, needed);
     if (!victims.length) return;
     const ids = new Set(victims.map(e => e.id));
-    await deleteFiles(victims.map(e => e.path));
+    await deleteFiles(eventFiles(victims));
     setEvents(evs => evs.filter(e => !ids.has(e.id)));
     // Re-measure rather than assume: the next sweep must decide against what
     // the volume actually reports, or it would keep reclaiming against a
@@ -960,7 +962,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     [events, selected],
   );
   const doDelete = useCallback(() => {
-    const path = selectedEvent?.path ?? null;
+    const files = selectedEvent ? eventFiles([selectedEvent]) : [];
     setEvents(evs => evs.filter(e => e.id !== selected));
     setSelected(null);
     setConfirmDelete(false);
@@ -968,13 +970,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     // to do so while this very unlink was still in flight — so "Espace" kept
     // showing the deleted clip's bytes as taken until the periodic sweep, up to
     // 30 s later. `doWipe` below already did it this way.
-    deleteFile(path).then(sweepDisk);
+    deleteFiles(files).then(sweepDisk);
   }, [selected, selectedEvent, sweepDisk]);
 
   const askWipe = useCallback(() => setConfirmWipe(true), []);
   const cancelWipe = useCallback(() => setConfirmWipe(false), []);
   const doWipe = useCallback(() => {
-    deleteFiles(events.map(e => e.path)).then(sweepDisk);
+    deleteFiles(eventFiles(events)).then(sweepDisk);
     setEvents([]);
     setConfirmWipe(false);
   }, [events, sweepDisk]);

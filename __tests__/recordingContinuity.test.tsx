@@ -51,6 +51,8 @@ function reportFreeSpace(free: number) {
   } as never);
 }
 
+const SNAPSHOT = '/tmp/novaguard-test/recordings/snap.jpg';
+
 /** Captures VisionCamera's callbacks so a test can land the clip itself. */
 function fakeCamera() {
   const calls: { onRecordingFinished: Function; onRecordingError: Function }[] = [];
@@ -58,6 +60,9 @@ function fakeCamera() {
     calls,
     startRecording: jest.fn(opts => calls.push(opts)),
     stopRecording: jest.fn(),
+    // The still kept for the history. Answers a path by default so the clip
+    // carries one; a test that wants the screen-off case rejects it.
+    takeSnapshot: jest.fn(async () => ({ path: SNAPSHOT })),
     last: () => calls[calls.length - 1],
   };
 }

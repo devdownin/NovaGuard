@@ -13,9 +13,10 @@
 
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
-import { FlatList, Text } from 'react-native';
+import { FlatList, Image, Text } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppStateProvider, useAppState } from '../src/state/AppStateContext';
+import { ClipThumbnail } from '../src/components/ClipThumbnail';
 import { EventCard } from '../src/components/EventCard';
 import { HistoryScreen } from '../src/screens/HistoryScreen';
 import { DetectionEvent } from '../src/state/types';
@@ -28,7 +29,10 @@ function event(id: number, daysBack: number, kind: DetectionEvent['kind'] = 'Per
   const when = new Date();
   when.setDate(when.getDate() - daysBack);
   when.setHours(18, 0, 0, 0);
-  return { id, kind, timestamp: when.getTime(), dur: 5, conf: 90, path: `/c/${id}.mp4`, bytes: 1024 };
+  return {
+    id, kind, timestamp: when.getTime(), dur: 5, conf: 90,
+    path: `/c/${id}.mp4`, bytes: 1024, thumbPath: `/c/${id}.jpg`,
+  };
 }
 
 type Handle = { state: ReturnType<typeof useAppState>; renderer: ReactTestRenderer.ReactTestRenderer };
@@ -148,4 +152,52 @@ describe('with nothing to show', () => {
     expect(handle.state.period).toBe('Tout');
     expect(handle.renderer.root.findAllByType(EventCard)).toHaveLength(1);
   });
+});
+
+describe('the card shows the clip, not a decoration', () => {
+  it('draws the still each event kept', async () => {
+    const handle = await showHistory([event(2, 0), event(1, 0)]);
+    const sources = handle.renderer.root
+      .findAllByType(Image)
+      .map(node => node.props.source.uri);
+
+    // Two cards, two different frames — the whole point. They used to be the
+    // same gradient and the same little rectangle on every row.
+    expect(sources).toEqual(['file:///c/2.jpg', 'file:///c/1.jpg']);
+  });
+
+  it('falls back to the placeholder for a clip recorded with no preview', async () => {
+    // What a screen-off recording gets: there was no preview view to snapshot.
+    const handle = await showHistory([{ ...event(1, 0), thumbPath: null }]);
+    expect(handle.renderer.root.findAllByType(Image)).toHaveLength(0);
+    expect(handle.renderer.root.findAllByType(EventCard)).toHaveLength(1);
+  });
+
+  it('falls back when the still is gone from disk', async () => {
+    const handle = await showHistory([event(1, 0)]);
+    const image = handle.renderer.root.findByType(Image);
+    // The retention can reclaim the file while the list is on screen; a broken
+    // image would leave a hole in the row.
+    await ReactTestRenderer.act(async () => { image.props.onError(); });
+
+    expect(handle.renderer.root.findAllByType(Image)).toHaveLength(0);
+    expect(handle.renderer.root.findAllByType(EventCard)).toHaveLength(1);
+  });
+});
+
+it('forgets a failed still when the same view is handed another clip', async () => {
+  // The detail sheet is one component for every event: open one whose still
+  // has been reclaimed, close it, open another, and a remembered failure would
+  // show the placeholder for a clip that has a perfectly good frame.
+  let tree!: ReactTestRenderer.ReactTestRenderer;
+  const thumb = (path: string) => (
+    <ClipThumbnail path={path} colors={['#000', '#111']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
+  );
+
+  await ReactTestRenderer.act(async () => { tree = ReactTestRenderer.create(thumb('/c/gone.jpg')); });
+  await ReactTestRenderer.act(async () => { tree.root.findByType(Image).props.onError(); });
+  expect(tree.root.findAllByType(Image)).toHaveLength(0);
+
+  await ReactTestRenderer.act(async () => { tree.update(thumb('/c/here.jpg')); });
+  expect(tree.root.findByType(Image).props.source.uri).toBe('file:///c/here.jpg');
 });

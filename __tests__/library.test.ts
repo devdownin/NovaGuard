@@ -33,7 +33,7 @@ function ev(id: number, daysBack: number, bytes = 10 * MB): DetectionEvent {
   d.setHours(12, 0, 0, 0);
   return {
     id, kind: 'Personne', timestamp: d.getTime(), dur: 12, conf: 90,
-    path: `/clips/${id}.mp4`, bytes,
+    path: `/clips/${id}.mp4`, bytes, thumbPath: `/clips/${id}.jpg`,
   };
 }
 
@@ -182,7 +182,7 @@ describe('eventsToReclaim', () => {
 
   it('skips events with no file, which would free nothing', () => {
     const withFile = ev(1, 1, 10 * MB);
-    const noFile: DetectionEvent = { ...ev(2, 9), path: null, bytes: 0 };
+    const noFile: DetectionEvent = { ...ev(2, 9), path: null, bytes: 0 , thumbPath: null};
     expect(eventsToReclaim([withFile, noFile], 5 * MB).map(e => e.id)).toEqual([1]);
   });
 
@@ -211,7 +211,7 @@ describe('bytesToReclaim', () => {
 
 describe('totalBytes', () => {
   it('sums real sizes and ignores fileless events', () => {
-    const noFile: DetectionEvent = { ...ev(9, 1), path: null, bytes: 0 };
+    const noFile: DetectionEvent = { ...ev(9, 1), path: null, bytes: 0 , thumbPath: null};
     expect(totalBytes([ev(1, 1, 3 * MB), ev(2, 2, 4 * MB), noFile])).toBe(7 * MB);
   });
 });
@@ -342,7 +342,7 @@ describe('historyRows', () => {
     dur: 5,
     conf: 90,
     path: null,
-    bytes: 0,
+    bytes: 0, thumbPath: null
   });
 
   const shape = (rows: ReturnType<typeof historyRows>) =>

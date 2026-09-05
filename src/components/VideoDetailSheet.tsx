@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
 import Video from 'react-native-video';
 import { color, font, radius } from '../theme';
 import { useAppState } from '../state/AppStateContext';
@@ -10,6 +9,7 @@ import { shareRecording } from '../surveillance/foregroundService';
 import { formatWhen } from '../utils/date';
 import { Sheet } from './Sheet';
 import { PlayIcon } from './icons';
+import { ClipThumbnail } from './ClipThumbnail';
 import { PrimaryOutlineButton, SecondaryOutlineButton, TextButton } from './OutlineButton';
 
 export function VideoDetailSheet() {
@@ -47,7 +47,16 @@ export function VideoDetailSheet() {
       {event && (
         <View>
           <View style={styles.preview}>
-            <LinearGradient colors={['#252838', '#0f1119']} start={{ x: 0.1, y: 0 }} end={{ x: 0.9, y: 1 }} style={StyleSheet.absoluteFill} />
+            {/* Hidden while the video plays: an <Image> over the surface would
+                cover the first frames it draws. */}
+            {!playing && (
+              <ClipThumbnail
+                path={event.thumbPath ?? null}
+                colors={['#252838', '#0f1119']}
+                start={{ x: 0.1, y: 0 }}
+                end={{ x: 0.9, y: 1 }}
+              />
+            )}
 
             {hasClip && playing ? (
               <Video

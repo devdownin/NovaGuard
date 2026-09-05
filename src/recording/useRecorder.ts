@@ -2,14 +2,28 @@ import { RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import type { Camera, VideoFile } from 'react-native-vision-camera';
 import { MaxDuration } from '../state/types';
 import { maxDurationMs } from './library';
-import { ensureRecordingsDir, fileSize, RECORDINGS_DIR } from './videoStore';
+import { deleteFile, ensureRecordingsDir, fileSize, RECORDINGS_DIR } from './videoStore';
 
 export interface Clip {
   path: string;
   bytes: number;
   /** Seconds, as reported by the encoder rather than measured by our timers. */
   duration: number;
+  /** The still saved for the history, or null when none could be taken. */
+  thumbPath: string | null;
 }
+
+/**
+ * JPEG quality of the still kept for the history.
+ *
+ * It is drawn 74x52 dp on a card and about a third of the screen in the detail
+ * sheet, so nothing above this is visible — and a thumbnail's bytes are not
+ * counted in the event's `bytes`, which is the size of the *video* the detail
+ * sheet reports. At this quality the under-count is a few hundred kilobytes
+ * across a full history, against a free-space figure that is measured on the
+ * volume rather than derived from it.
+ */
+export const THUMBNAIL_QUALITY = 55;
 
 interface Options {
   cameraRef: RefObject<Camera | null>;
@@ -95,6 +109,15 @@ export function useRecorder({
   const onMaxDurationRef = useRef(onMaxDuration);
   const onAbandonedRef = useRef(onAbandoned);
   const onEncoderFreeRef = useRef(onEncoderFree);
+  /**
+   * The still for the clip being written, still in flight.
+   *
+   * Held as the promise rather than its value so the clip is never reported
+   * before the snapshot has landed: resolving it afterwards would leave a JPEG
+   * in the recordings directory that no event points at, and the launch sweep
+   * is the only thing that would ever remove it.
+   */
+  const thumbRef = useRef<Promise<string | null> | null>(null);
   useEffect(() => { onClipRef.current = onClip; }, [onClip]);
   useEffect(() => { onErrorRef.current = onError; }, [onError]);
   useEffect(() => { onMaxDurationRef.current = onMaxDuration; }, [onMaxDuration]);
@@ -168,15 +191,20 @@ export function useRecorder({
           // Announced before the size is read, and deliberately: the camera is
           // free now, and anything done first is footage the next clip misses.
           onEncoderFreeRef.current?.();
+          const thumb = thumbRef.current ?? Promise.resolve(null);
           // `VideoFile` has no size, so the real byte count is read back from
-          // disk once the encoder has closed the file.
-          fileSize(video.path).then(bytes => {
-            onClipRef.current({ path: video.path, bytes, duration: video.duration });
+          // disk once the encoder has closed the file. Both round trips happen
+          // after `onEncoderFree`, so neither is time nobody is being filmed.
+          Promise.all([fileSize(video.path), thumb]).then(([bytes, thumbPath]) => {
+            onClipRef.current({ path: video.path, bytes, duration: video.duration, thumbPath });
           });
         },
         onRecordingError: error => {
           settle();
           clearCap();
+          // No clip will carry it, so nothing would ever delete it.
+          thumbRef.current?.then(deleteFile);
+          thumbRef.current = null;
           onErrorRef.current?.(error.message);
           // No clip is coming from this one either — a caller holding an event
           // for it would otherwise wait forever. A recording that was never
@@ -189,6 +217,25 @@ export function useRecorder({
       onErrorRef.current?.(e instanceof Error ? e.message : 'Enregistrement impossible');
       return false;
     }
+
+    /*
+     * The frame that opened the clip, kept so the history shows what was seen
+     * rather than a gradient that is the same on every card.
+     *
+     * `takeSnapshot` and not `takePhoto`: a photo output would have to be added
+     * to the capture session, and reconfiguring that session mid-passage is a
+     * mistake this repository has already paid for. A snapshot is a screenshot
+     * of the preview view — it touches neither the encoder nor the session, and
+     * it costs nothing when it fails.
+     *
+     * It fails whenever there is no preview to screenshot, which is exactly the
+     * screen-off case `useForeground` creates: those clips keep the placeholder,
+     * and that is the accepted price of not reconfiguring the session.
+     */
+    thumbRef.current = camera
+      .takeSnapshot({ quality: THUMBNAIL_QUALITY, path: RECORDINGS_DIR })
+      .then(photo => photo.path)
+      .catch(() => null);
 
     capTimerRef.current = setTimeout(() => {
       capTimerRef.current = null;
