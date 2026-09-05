@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { color, font, shadow } from '../theme';
 import { Period } from '../state/types';
 import { ChevronDownIcon } from './icons';
+import { tValue } from '../i18n';
 
 const OPTIONS: Period[] = ["Aujourd'hui", '7 jours', '30 jours', 'Tout'];
 
@@ -17,14 +18,14 @@ export function PeriodDropdown({ value, open, onToggle, onSelect }: PeriodDropdo
   return (
     <View style={styles.wrap}>
       <Pressable onPress={onToggle} style={styles.trigger}>
-        <Text style={styles.triggerLabel}>{value}</Text>
+        <Text style={styles.triggerLabel}>{tValue(`value.period.${value}`)}</Text>
         <ChevronDownIcon size={9} color={color.neutral300} />
       </Pressable>
       {open && (
         <View style={styles.menu}>
           {OPTIONS.map(opt => (
             <Pressable key={opt} onPress={() => onSelect(opt)} style={styles.menuItem}>
-              <Text style={styles.menuLabel}>{opt}</Text>
+              <Text style={styles.menuLabel}>{tValue(`value.period.${opt}`)}</Text>
               {opt === value && <Text style={styles.menuCheck}>✓</Text>}
             </Pressable>
           ))}

@@ -1,5 +1,6 @@
 import { DetectionKind, Settings } from '../state/types';
 import { pad } from '../utils/date';
+import { t } from '../i18n';
 
 /**
  * When a detection is worth interrupting someone for, and what the alert says.
@@ -33,7 +34,7 @@ export function alertContent(kind: DetectionKind, at: number): { title: string; 
   const d = new Date(at);
   const time = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
   return {
-    title: kind === 'Personne' ? 'Personne détectée' : 'Animal détecté',
+    title: t(kind === 'Personne' ? 'notif.person' : 'notif.animal'),
     body: `À ${time} · enregistrement en cours`,
   };
 }

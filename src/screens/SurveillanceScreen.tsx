@@ -4,6 +4,7 @@ import { color, font } from '../theme';
 import { useAppState } from '../state/AppStateContext';
 import { formatBytes } from '../recording/library';
 import { useLandscape } from '../utils/useLandscape';
+import { t } from '../i18n';
 import { Viewfinder } from '../components/Viewfinder';
 
 /**
@@ -23,7 +24,7 @@ export function SurveillanceScreen() {
   const brand = (
     <View>
       <Text style={styles.brand}>NOVAGUARD</Text>
-      <Text style={styles.brandSub}>Caméra intelligente locale</Text>
+      <Text style={styles.brandSub}>{t('surv.tagline')}</Text>
     </View>
   );
 
@@ -39,7 +40,7 @@ export function SurveillanceScreen() {
     >
       <View style={[styles.statusDot, { backgroundColor: monitoring ? color.accent : color.neutral600 }]} />
       <Text style={[styles.statusLabel, { color: monitoring ? color.accent200 : color.neutral500 }]}>
-        {monitoring ? 'Surveillance active' : 'Surveillance inactive'}
+        {t(monitoring ? 'surv.status.on' : 'surv.status.off')}
       </Text>
     </View>
   );
@@ -56,18 +57,18 @@ export function SurveillanceScreen() {
       ]}
     >
       <Text style={[styles.ctaLabel, { color: monitoring ? color.neutral200 : color.accent200 }]}>
-        {monitoring ? 'ARRÊTER LA SURVEILLANCE' : 'DÉMARRER LA SURVEILLANCE'}
+        {t(monitoring ? 'surv.cta.stop' : 'surv.cta.start')}
       </Text>
     </Pressable>
   );
 
   // Three cells side by side in a 232 dp column would each get ~75 dp, which is
-  // narrower than "Aujourd'hui" — so they turn into rows there.
+  // narrower than the longest label — so they turn into rows there.
   const stats = (
     <View style={[styles.statsRow, landscape && styles.statsColumn]}>
-      <StatCell label="Dernière" value={lastDet} landscape={landscape} />
-      <StatCell label="Aujourd'hui" value={detToday} landscape={landscape} />
-      <StatCell label="Espace" value={formatBytes(store.free)} landscape={landscape} />
+      <StatCell label={t('surv.stat.last')} value={lastDet} landscape={landscape} />
+      <StatCell label={t('surv.stat.today')} value={detToday} landscape={landscape} />
+      <StatCell label={t('surv.stat.space')} value={formatBytes(store.free)} landscape={landscape} />
     </View>
   );
 

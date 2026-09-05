@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { DetectionEvent, DetectionKind, MaxDuration, Period, PostRoll, Quality, Retention } from '../state/types';
 import { startOfDayBefore } from '../utils/date';
 
@@ -24,6 +25,11 @@ export const LOW_SPACE_BYTES = 500 * 1024 * 1024;
  */
 export const MIN_FREE_BYTES = 150 * 1024 * 1024;
 
+/** One decimal, with the separator the reader's language uses. */
+function decimal(value: number): string {
+  return value.toFixed(1).replace('.', t('number.decimal'));
+}
+
 const KO = 1024;
 const MO = KO * 1024;
 const GO = MO * 1024;
@@ -38,11 +44,11 @@ const GO = MO * 1024;
  * least "1 Ko" for the same reason.
  */
 export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 Ko';
-  if (bytes >= GO) return (bytes / GO).toFixed(1).replace('.', ',') + ' Go';
-  if (bytes >= 10 * MO) return Math.round(bytes / MO).toString() + ' Mo';
-  if (bytes >= MO) return (bytes / MO).toFixed(1).replace('.', ',') + ' Mo';
-  return Math.max(1, Math.round(bytes / KO)).toString() + ' Ko';
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 ' + t('unit.kb');
+  if (bytes >= GO) return decimal(bytes / GO) + ' ' + t('unit.gb');
+  if (bytes >= 10 * MO) return Math.round(bytes / MO).toString() + ' ' + t('unit.mb');
+  if (bytes >= MO) return decimal(bytes / MO) + ' ' + t('unit.mb');
+  return Math.max(1, Math.round(bytes / KO)).toString() + ' ' + t('unit.kb');
 }
 
 /** `null` means "Toujours" — nothing ever expires on age alone. */

@@ -5,12 +5,13 @@ import { color, font } from '../theme';
 import { Tab } from '../state/types';
 import { useAppState } from '../state/AppStateContext';
 import { useLandscape } from '../utils/useLandscape';
+import { StringKey, t } from '../i18n';
 import { CameraIcon, HistoryIcon, SetupIcon } from './icons';
 
-const TABS: { key: Tab; label: string; Icon: typeof CameraIcon }[] = [
-  { key: 'cam', label: 'Caméra', Icon: CameraIcon },
-  { key: 'hist', label: 'Historique', Icon: HistoryIcon },
-  { key: 'setup', label: 'Setup', Icon: SetupIcon },
+const TABS: { key: Tab; labelKey: StringKey; Icon: typeof CameraIcon }[] = [
+  { key: 'cam', labelKey: 'tab.cam', Icon: CameraIcon },
+  { key: 'hist', labelKey: 'tab.hist', Icon: HistoryIcon },
+  { key: 'setup', labelKey: 'tab.setup', Icon: SetupIcon },
 ];
 
 /**
@@ -36,7 +37,7 @@ export function TabBar() {
         landscape ? { paddingBottom: insets.bottom } : { paddingBottom: Math.max(10, insets.bottom) },
       ]}
     >
-      {TABS.map(({ key, label, Icon }) => {
+      {TABS.map(({ key, labelKey, Icon }) => {
         const active = tab === key;
         const tint = active ? color.accent : color.neutral600;
         return (
@@ -50,7 +51,7 @@ export function TabBar() {
             <View style={[styles.pill, { backgroundColor: active ? color.accent900 : 'transparent' }]}>
               <Icon size={22} color={tint} />
             </View>
-            <Text style={[styles.label, { color: tint }]}>{label}</Text>
+            <Text style={[styles.label, { color: tint }]}>{t(labelKey)}</Text>
           </Pressable>
         );
       })}

@@ -10,6 +10,7 @@ import { GridOverlay } from './GridOverlay';
 import { CameraFeed } from './CameraFeed';
 import { DetectionOverlay } from './DetectionOverlay';
 import { LiveClock } from './LiveClock';
+import { t } from '../i18n';
 
 const BEAM_HEIGHT = 70;
 
@@ -107,16 +108,16 @@ export function Viewfinder() {
     maxCameraZoom,
   });
 
-  const standbyLabel = !perms.cam
-    ? 'AUTORISEZ LA CAMÉRA'
+  const standbyLabel = t(!perms.cam
+    ? 'view.grantCamera'
     : monitoring
-      ? 'AUCUNE CAMÉRA DÉTECTÉE'
-      : 'CAMÉRA EN VEILLE';
-  const standbySubtext = !perms.cam ? 'Setup → Confidentialité → Permissions' : undefined;
+      ? 'view.noCamera'
+      : 'view.standby');
+  const standbySubtext = !perms.cam ? t('view.grantCameraWhere') : undefined;
 
-  const overlayText = det
-    ? det === 'Personne' ? 'Personne détectée · enregistrement' : 'Animal détecté · enregistrement'
-    : monitoring ? 'Aucune détection' : 'Caméra en veille';
+  const overlayText = t(det
+    ? det === 'Personne' ? 'view.overlay.person' : 'view.overlay.animal'
+    : monitoring ? 'view.overlay.none' : 'view.overlay.idle');
   const overlayDotColor = det ? color.accent : color.neutral600;
 
   return (
@@ -195,7 +196,7 @@ export function Viewfinder() {
       {autoZoom.phase !== 'idle' && (
         <View style={styles.zoomChip}>
           <Text style={styles.zoomChipText}>
-            {autoZoom.phase === 'close' ? 'PLAN SERRÉ' : 'PLAN LARGE'}
+            {t(autoZoom.phase === 'close' ? 'view.zoom.close' : 'view.zoom.wide')}
           </Text>
         </View>
       )}

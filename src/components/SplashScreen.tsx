@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Image, StyleSheet, Text, View } from 'react-native';
 import { color, font } from '../theme';
+import { t } from '../i18n';
 import {
   CameraIcon, DogIcon, PersonIcon, ShieldHomeIcon, ShieldLockIcon,
 } from './icons';
@@ -13,21 +14,21 @@ export const SPLASH_MIN_DURATION_MS = 1600;
 function Pulse({ children, minOpacity = 0.35, size = 1.08, duration = 1400 }: {
   children: React.ReactNode; minOpacity?: number; size?: number; duration?: number;
 }) {
-  const t = useRef(new Animated.Value(0)).current;
+  const phase = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(t, { toValue: 1, duration, useNativeDriver: true }),
-        Animated.timing(t, { toValue: 0, duration, useNativeDriver: true }),
+        Animated.timing(phase, { toValue: 1, duration, useNativeDriver: true }),
+        Animated.timing(phase, { toValue: 0, duration, useNativeDriver: true }),
       ]),
     );
     loop.start();
     return () => loop.stop();
-  }, [t, duration]);
+  }, [phase, duration]);
 
-  const opacity = t.interpolate({ inputRange: [0, 1], outputRange: [minOpacity, 1] });
-  const scale = t.interpolate({ inputRange: [0, 1], outputRange: [1, size] });
+  const opacity = phase.interpolate({ inputRange: [0, 1], outputRange: [minOpacity, 1] });
+  const scale = phase.interpolate({ inputRange: [0, 1], outputRange: [1, size] });
 
   return (
     <Animated.View style={{ opacity, transform: [{ scale }] }}>
@@ -115,15 +116,15 @@ export function SplashScreen() {
           </Text>
         </View>
 
-        <Text style={styles.taglineMuted}>DÉTECTION INTELLIGENTE</Text>
-        <Text style={styles.taglineAccent}>PERSONNES &amp; ANIMAUX</Text>
+        <Text style={styles.taglineMuted}>{t('splash.tagline1')}</Text>
+        <Text style={styles.taglineAccent}>{t('splash.tagline2')}</Text>
 
         <View style={styles.featureRow}>
-          <FeatureItem Icon={PersonIcon} label="Détecte" sub="en temps réel" />
+          <FeatureItem Icon={PersonIcon} label={t('splash.detect')} sub={t('splash.detect.sub')} />
           <View style={styles.featureDivider} />
-          <FeatureItem Icon={CameraIcon} label="Enregistre" sub="automatiquement" />
+          <FeatureItem Icon={CameraIcon} label={t('splash.record')} sub={t('splash.record.sub')} />
           <View style={styles.featureDivider} />
-          <FeatureItem Icon={ShieldLockIcon} label="Protège" sub="vos données" />
+          <FeatureItem Icon={ShieldLockIcon} label={t('splash.protect')} sub={t('splash.protect.sub')} />
         </View>
       </View>
 
@@ -132,7 +133,7 @@ export function SplashScreen() {
       </View>
 
       <View style={styles.footer}>
-        <Text style={styles.footerText}>Initialisation en cours…</Text>
+        <Text style={styles.footerText}>{t('splash.loading')}</Text>
         <View style={styles.progressTrack}>
           <Animated.View style={[styles.progressFill, { width: progressWidth }]} />
         </View>

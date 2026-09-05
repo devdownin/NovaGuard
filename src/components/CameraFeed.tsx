@@ -9,6 +9,7 @@ import { useRunOnJS } from 'react-native-worklets-core';
 import { useAppState } from '../state/AppStateContext';
 import { devicePositionFor, physicalDeviceFilterFor } from '../camera/deviceSelection';
 import { uprightAspect, uprightRotation } from '../camera/orientation';
+import { t } from '../i18n';
 import { uprightBoxToViewBox } from '../camera/framing';
 import { useDetectionModel } from '../camera/useDetectionModel';
 import { interpretDetections } from '../ml/interpretDetections';
@@ -102,7 +103,7 @@ export function CameraFeed({
 
   useEffect(() => {
     if (!onProblem) return;
-    onProblem(modelFailed ? 'Modèle de détection impossible à charger' : null);
+    onProblem(modelFailed ? t('error.model') : null);
   }, [modelFailed, onProblem]);
 
   // Recorded as soon as the camera is asked to open, because opening it is
@@ -314,7 +315,7 @@ export function CameraFeed({
       frameProcessor={active ? frameProcessor : undefined}
       pixelFormat="yuv"
       resizeMode="cover"
-      onError={error => onProblem?.(`Caméra : ${error.message}`)}
+      onError={error => onProblem?.(t('error.camera', { message: error.message }))}
       video={true}
       // Audio is only captured once the OS microphone permission is actually
       // granted — asking the camera for audio without it aborts the recording.

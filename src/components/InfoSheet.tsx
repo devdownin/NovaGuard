@@ -7,11 +7,12 @@ import { formatBytes } from '../recording/library';
 import { Sheet } from './Sheet';
 import { PrimaryOutlineButton } from './OutlineButton';
 import { ValueButton } from './SetupRows';
+import { StringKey, t, tn } from '../i18n';
 
-const TITLES: Record<'perms' | 'data' | 'licenses', string> = {
-  perms: 'Permissions',
-  data: 'Données stockées',
-  licenses: 'Licences tierces',
+const TITLES: Record<'perms' | 'data' | 'licenses', StringKey> = {
+  perms: 'info.perms',
+  data: 'info.data',
+  licenses: 'info.licenses',
 };
 
 export function InfoSheet() {
@@ -30,34 +31,34 @@ export function InfoSheet() {
    */
   const rows = info === 'perms'
     ? [
-      { key: 'cam' as const, label: 'Caméra', note: 'Flux vidéo local', value: 'Autorisée' },
-      { key: 'mic' as const, label: 'Microphone', note: 'Audio des vidéos', value: 'Autorisé' },
-      { key: 'notif' as const, label: 'Notifications', note: 'Alertes de détection', value: 'Autorisées' },
+      { key: 'cam' as const, label: t('info.perm.cam'), note: t('info.perm.cam.note'), value: t('info.perm.cam.granted') },
+      { key: 'mic' as const, label: t('info.perm.mic'), note: t('info.perm.mic.note'), value: t('info.perm.mic.granted') },
+      { key: 'notif' as const, label: t('info.perm.notif'), note: t('info.perm.notif.note'), value: t('info.perm.notif.granted') },
       // Granted by installing the app: nothing to ask for, so nothing to press.
-      { label: 'Stockage', note: 'Écriture des vidéos', value: 'Autorisé' },
+      { label: t('info.perm.storage'), note: t('info.perm.storage.note'), value: t('info.perm.storage.granted') },
     ]
     : info === 'licenses'
-      ? THIRD_PARTY_LICENSES.map(lib => ({ label: lib.name, note: lib.note, value: lib.license }))
+      ? THIRD_PARTY_LICENSES.map(lib => ({ label: lib.name, note: t(lib.noteKey), value: lib.license }))
       : [
         // Files, not events: a sighting the encoder produced nothing for is
         // kept as history and has nothing on disk to count.
         {
-          label: 'Vidéos enregistrées',
-          note: "Dossier privé de l'application",
-          value: `${clipCount} ${clipCount === 1 ? 'fichier' : 'fichiers'} · ${formatBytes(store.used)}`,
+          label: t('info.data.clips'),
+          note: t('info.data.clips.note'),
+          value: tn('info.data.clips.value.other', clipCount, { size: formatBytes(store.used) }),
         },
         // Measured, both of them. These two rows used to be constants — and one
         // of them billed 2,1 Mo to a thumbnail cache that exists nowhere in this
         // repository. The screen that tells the user what is kept about them is
         // the last place to invent a number.
-        { label: 'Journal de détection', note: 'Type, heure, confiance', value: formatBytes(storedSize.journal) },
-        { label: 'Réglages', note: 'Préférences et compteurs', value: formatBytes(storedSize.settings) },
-        { label: 'Envoyé sur un serveur', note: 'Aucune donnée sortante', value: 'Rien' },
+        { label: t('info.data.journal'), note: t('info.data.journal.note'), value: formatBytes(storedSize.journal) },
+        { label: t('info.data.settings'), note: t('info.data.settings.note'), value: formatBytes(storedSize.settings) },
+        { label: t('info.data.sent'), note: t('info.data.sent.note'), value: t('info.data.sent.value') },
       ];
 
   return (
     <Sheet visible={!!info} onClose={closeInfo} maxHeightPercent={76}>
-      <Text style={styles.title}>{info ? TITLES[info] : ''}</Text>
+      <Text style={styles.title}>{info ? t(TITLES[info]) : ''}</Text>
       {rows.map(row => {
         const key = 'key' in row ? row.key : null;
         const granted = key ? perms[key] : true;
@@ -69,11 +70,11 @@ export function InfoSheet() {
             </View>
             {granted
               ? <Text style={styles.value}>{row.value}</Text>
-              : <ValueButton label="Autoriser" onPress={() => grantPermission(key!)} />}
+              : <ValueButton label={t('info.allow')} onPress={() => grantPermission(key!)} />}
           </View>
         );
       })}
-      <PrimaryOutlineButton label="Fermer" onPress={closeInfo} style={{ width: '100%', marginTop: 16 }} />
+      <PrimaryOutlineButton label={t('info.close')} onPress={closeInfo} style={{ width: '100%', marginTop: 16 }} />
     </Sheet>
   );
 }

@@ -1,0 +1,284 @@
+/**
+ * English, the locale every device that is not French-speaking gets.
+ *
+ * Typed as a total record of `StringKey`, so a string added to `fr.ts` and
+ * forgotten here is a compile error rather than a French sentence appearing
+ * mid-screen for an English reader. Deliberately not `Partial`.
+ *
+ * The `value.*` keys translate what is *shown* for a stored identifier; the
+ * identifiers themselves stay French — see the note at the end of `fr.ts`.
+ *
+ * @format
+ */
+
+import { StringKey } from './fr';
+
+export const en: Record<StringKey, string> = {
+  // ── shell ────────────────────────────────────────────────────────────
+  'tab.cam': 'Camera',
+  'tab.hist': 'History',
+  'tab.setup': 'Setup',
+
+  // ── surveillance screen ──────────────────────────────────────────────
+  'surv.tagline': 'Local smart camera',
+  'surv.status.on': 'Monitoring on',
+  'surv.status.off': 'Monitoring off',
+  'surv.cta.start': 'START MONITORING',
+  'surv.cta.stop': 'STOP MONITORING',
+  'surv.stat.last': 'Last',
+  'surv.stat.today': 'Today',
+  'surv.stat.space': 'Space',
+
+  // ── viewfinder ───────────────────────────────────────────────────────
+  'view.standby': 'CAMERA ON STANDBY',
+  'view.noCamera': 'NO CAMERA FOUND',
+  'view.grantCamera': 'ALLOW THE CAMERA',
+  'view.grantCameraWhere': 'Setup → Privacy → Permissions',
+  'view.overlay.person': 'Person detected · recording',
+  'view.overlay.animal': 'Animal detected · recording',
+  'view.overlay.none': 'Nothing detected',
+  'view.overlay.idle': 'Camera on standby',
+  'view.zoom.close': 'CLOSE SHOT',
+  'view.zoom.wide': 'WIDE SHOT',
+
+  // ── history ──────────────────────────────────────────────────────────
+  'hist.title': 'History',
+  'hist.count.one': '{count} video',
+  'hist.count.other': '{count} videos',
+  'hist.empty': 'No event for this filter.',
+  'hist.event.person': 'Person detected',
+  'hist.event.animal': 'Animal detected',
+  'hist.event.meta': '{dur} seconds · {conf} %',
+
+  // ── event detail ─────────────────────────────────────────────────────
+  'detail.play': 'Play the recording',
+  'detail.noClip': 'NO VIDEO FOR THIS EVENT',
+  'detail.when': 'Date & time',
+  'detail.type': 'Type',
+  'detail.duration': 'Duration',
+  'detail.seconds': '{dur} seconds',
+  'detail.confidence': 'Confidence',
+  'detail.percent': '{value} %',
+  'detail.size': 'Size',
+  'detail.file': 'File',
+  'detail.share': 'Share',
+  'detail.delete': 'Delete',
+  'detail.close': 'Close',
+
+  // ── setup ────────────────────────────────────────────────────────────
+  'setup.title': 'Setup',
+  'setup.section.surv': 'MONITORING',
+  'setup.section.det': 'DETECTION',
+  'setup.section.rec': 'RECORDING',
+  'setup.section.sto': 'STORAGE',
+  'setup.section.not': 'NOTIFICATIONS',
+  'setup.section.about': 'ABOUT',
+
+  'setup.camera': 'Camera used',
+  'setup.resume': 'Resume when opened',
+  'setup.resume.sub': 'Android forbids the camera from starting on its own after a reboot',
+  'setup.night': 'Night mode',
+  'setup.night.sub': 'Available on this device',
+
+  'setup.person': 'Detect people',
+  'setup.animal': 'Detect animals',
+  'setup.autoZoom': 'Auto-zoom on people',
+  'setup.autoZoom.sub': 'Close shot for 4 s, then a wide shot of the scene',
+  'setup.forceCpu': 'Detect on the CPU',
+  'setup.forceCpu.sub': 'Worth trying if nothing is ever detected: forces the computation onto the CPU',
+  'setup.sens': 'Sensitivity',
+  'setup.sens.hint.Basse': '1 frame analysed per second — frugal, but a quick passer-by can slip through',
+  'setup.sens.hint.Moyenne': '3 frames per second',
+  'setup.sens.hint.Haute': '5 frames per second — quickest to react, heaviest on the battery',
+  'setup.threshold': 'Confidence threshold',
+
+  'setup.post': 'Keep recording after a detection',
+  'setup.max': 'Max. clip length',
+  'setup.max.sub': 'Recording continues while a subject is visible: past this, it carries on in a new clip',
+  'setup.quality': 'Video quality',
+  'setup.quality.sub4k': '4K also quadruples the cost of analysing each frame',
+
+  'setup.storage.used': 'Used',
+  'setup.storage.free': 'Available',
+  'setup.storage.videos': 'Videos',
+  'setup.retention': 'Keep videos for',
+  'setup.autoDel': 'Automatic deletion',
+  'setup.autoDel.sub': 'When storage runs low',
+  'setup.wipe': 'Delete every video',
+
+  'setup.notif': 'Notifications on',
+  'setup.notifDet': 'On every detection',
+  'setup.sound': 'Sound and vibration (Android)',
+  'setup.sound.hint': 'Since Android 8, a notification’s sound and vibration belong to the system, not to the app.',
+
+  'setup.version': 'Version',
+  'setup.license': 'Licence',
+  'setup.license.sub': 'Free and open source software',
+  'setup.clipGap': 'Gap between two clips',
+  'setup.source': 'Source code',
+  'setup.report': 'Report a bug',
+  'setup.thirdParty': 'Third-party licences',
+
+  'setup.privacy': 'PRIVACY',
+  'setup.privacy.heading': 'Local processing',
+  'setup.privacy.body': 'Detection runs on the device. Videos stay on your phone and are never sent to a server.',
+  'setup.privacy.perms': 'Permissions',
+  'setup.privacy.data': 'Stored data',
+
+  // ── info sheets ──────────────────────────────────────────────────────
+  'info.perms': 'Permissions',
+  'info.data': 'Stored data',
+  'info.licenses': 'Third-party licences',
+  'info.close': 'Close',
+  'info.allow': 'Allow',
+  'info.perm.cam': 'Camera',
+  'info.perm.cam.note': 'Local video feed',
+  'info.perm.cam.granted': 'Allowed',
+  'info.perm.mic': 'Microphone',
+  'info.perm.mic.note': 'Audio of the videos',
+  'info.perm.mic.granted': 'Allowed',
+  'info.perm.notif': 'Notifications',
+  'info.perm.notif.note': 'Detection alerts',
+  'info.perm.notif.granted': 'Allowed',
+  'info.perm.storage': 'Storage',
+  'info.perm.storage.note': 'Writing the videos',
+  'info.perm.storage.granted': 'Allowed',
+  'info.data.clips': 'Recorded videos',
+  'info.data.clips.note': 'The app’s private folder',
+  'info.data.clips.value.one': '{count} file · {size}',
+  'info.data.clips.value.other': '{count} files · {size}',
+  'info.data.journal': 'Detection log',
+  'info.data.journal.note': 'Type, time, confidence',
+  'info.data.settings': 'Settings',
+  'info.data.settings.note': 'Preferences and counters',
+  'info.data.sent': 'Sent to a server',
+  'info.data.sent.note': 'Nothing leaves the device',
+  'info.data.sent.value': 'Nothing',
+
+  // ── onboarding ───────────────────────────────────────────────────────
+  'onb.welcome': 'WELCOME',
+  'onb.headline': 'NovaGuard turns this\nphone into a camera.',
+  'onb.step1': 'Local detection',
+  'onb.step1.body': 'People and animals are recognised directly on the device.',
+  'onb.step2': 'Automatic recording',
+  'onb.step2.body': 'Video starts as soon as a detection is confirmed.',
+  'onb.step3': 'Videos kept locally',
+  'onb.step3.body': 'Nothing leaves your phone, and no account is required.',
+  'onb.continue': 'CONTINUE',
+  'onb.perms': 'PERMISSIONS',
+  'onb.perms.headline': 'Three permissions,\nasked one at a time.',
+  'onb.perms.sub': 'You can refuse notifications and the microphone: monitoring works either way.',
+  'onb.perm.cam.note': 'Required for monitoring',
+  'onb.perm.mic.note': 'Sound in the recordings',
+  'onb.perm.notif.note': 'Alert on a detection',
+  'onb.granted': 'Allowed',
+  'onb.grant': 'Allow',
+  'onb.start': 'GET STARTED',
+  'onb.blocked': 'ALLOW THE CAMERA FIRST',
+
+  // ── splash ───────────────────────────────────────────────────────────
+  'splash.tagline1': 'SMART DETECTION',
+  'splash.tagline2': 'PEOPLE & ANIMALS',
+  'splash.detect': 'Detects',
+  'splash.detect.sub': 'in real time',
+  'splash.record': 'Records',
+  'splash.record.sub': 'automatically',
+  'splash.protect': 'Protects',
+  'splash.protect.sub': 'your data',
+  'splash.loading': 'Starting up…',
+
+  // ── confirmations ────────────────────────────────────────────────────
+  'confirm.cancel': 'Cancel',
+  'confirm.delete.title': 'Delete this video?',
+  'confirm.delete.body': 'The video will be permanently deleted from your device. This cannot be undone.',
+  'confirm.delete.ok': 'Delete',
+  'confirm.wipe.title': 'Delete every video?',
+  'confirm.wipe.body.one': '{count} video will be deleted from this device. This cannot be undone.',
+  'confirm.wipe.body.other': '{count} videos will be deleted from this device. This cannot be undone.',
+  'confirm.wipe.ok': 'Delete everything',
+
+  // ── errors shown to the user ─────────────────────────────────────────
+  'error.historyUnreadable': 'History unreadable: the videos are kept',
+  'error.grantCamera': 'Allow the camera to start monitoring',
+  'error.model': 'Detection model could not be loaded',
+  'error.camera': 'Camera: {message}',
+  'error.frame.interrupted': 'Frame analysis interrupted',
+  'error.frame.detail': 'Frame analysis: {message}',
+  'error.frame.duringStage': 'Frame analysis interrupted during {stage}',
+  'error.prefix.camera': 'Camera',
+  'error.prefix.model': 'Detection model',
+  'error.prefix.frame': 'Frame analysis',
+
+  // ── frame stages, named in the two messages above ────────────────────
+  'stage.camera': 'opening the camera',
+  'stage.resize': 'scaling the frame',
+  'stage.inference': 'detection (model)',
+  'stage.faces': 'face detection',
+  'stage.report': 'reporting the results',
+
+  // ── clip gap, measured on the device ─────────────────────────────────
+  'clipGap.none': 'Not measured yet',
+  'clipGap.tooShort': 'Film a passage longer than the max. clip length to get a measurement',
+  'clipGap.cuts.one': '1 cut',
+  'clipGap.cuts.other': '{count} cuts',
+  'clipGap.detail': '{cuts} · worst {worst} · last: {finalize} finalising + {restart} restarting',
+
+  'unit.kb': 'KB',
+  'unit.mb': 'MB',
+  'unit.gb': 'GB',
+  'number.decimal': '.',
+
+  // ── notifications ────────────────────────────────────────────────────
+  'notif.title': 'Monitoring on',
+  'notif.monitoring': 'NovaGuard is watching the camera. Everything stays on this device.',
+  'notif.person': 'Person detected',
+  'notif.animal': 'Animal detected',
+
+  // ── dates ────────────────────────────────────────────────────────────
+  'lic.react-react-native': 'Application framework',
+  'lic.react-native-vision-camera': 'Camera feed and frame processors',
+  'lic.react-native-fast-tflite': 'On-device TensorFlow Lite inference',
+  'lic.react-native-vision-camera-face-detector': 'Face detection (ML Kit)',
+  'lic.vision-camera-resize-plugin': 'Resizing the camera frames',
+  'lic.dr-pogodin-react-native-fs': 'Video files and disk space',
+  'lic.react-native-video': 'Playing the recordings',
+  'lic.react-native-worklets-core': 'Frame work off the JS thread',
+  'lic.efficientdet-lite0-coco': 'Bundled detection model',
+  'lic.react-native-safe-area-context': 'Safe areas of the screen',
+  'lic.react-native-svg': 'Vector icons',
+  'lic.react-native-linear-gradient': 'Visual gradients',
+  'lic.react-native-community-slider': 'Confidence-threshold slider',
+  'lic.react-native-async-storage-async-storage': 'Local storage of the settings',
+  'lic.androidx-core': 'Foreground-service notification',
+  'lic.inter': 'Typeface',
+
+  'date.today': 'Today, {time}',
+  'date.yesterday': 'Yesterday, {time}',
+  'date.other': '{month} {day}, {time}',
+  'date.months': 'Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec',
+
+  // ── stored values, displayed ─────────────────────────────────────────
+  // The unions in `state/types.ts` are French identifiers written to disk and
+  // compared by the tracker. They are never translated, only *displayed*
+  // through these keys — renaming a variant would orphan every stored event.
+  'value.kind.Personne': 'Person',
+  'value.kind.Animal': 'Animal',
+  'value.filter.Toutes': 'All',
+  'value.filter.Personnes': 'People',
+  'value.filter.Animaux': 'Animals',
+  "value.period.Aujourd'hui": 'Today',
+  'value.period.7 jours': '7 days',
+  'value.period.30 jours': '30 days',
+  'value.period.Tout': 'All',
+  'value.sens.Basse': 'Low',
+  'value.sens.Moyenne': 'Medium',
+  'value.sens.Haute': 'High',
+  'value.camera.Arrière (1×)': 'Back (1×)',
+  'value.camera.Arrière (0,5×)': 'Back (0.5×)',
+  'value.camera.Avant': 'Front',
+  'value.retention.1 jour': '1 day',
+  'value.retention.7 jours': '7 days',
+  'value.retention.30 jours': '30 days',
+  'value.retention.90 jours': '90 days',
+  'value.retention.Toujours': 'Forever',
+};

@@ -14,12 +14,15 @@ import { Switch } from '../components/Switch';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { PrimaryOutlineButton, SecondaryOutlineButton } from '../components/OutlineButton';
 import { ShieldCheckIcon } from '../components/icons';
+import { StringKey, t, tValue } from '../i18n';
 import { useLandscape } from '../utils/useLandscape';
 
+// Labels translated, values not: the variants are written to disk. See the
+// note at the end of `i18n/fr.ts`.
 const SENS_OPTIONS: { label: string; value: Sensitivity }[] = [
-  { label: 'Basse', value: 'Basse' },
-  { label: 'Moyenne', value: 'Moyenne' },
-  { label: 'Haute', value: 'Haute' },
+  { label: tValue('value.sens.Basse'), value: 'Basse' },
+  { label: tValue('value.sens.Moyenne'), value: 'Moyenne' },
+  { label: tValue('value.sens.Haute'), value: 'Haute' },
 ];
 
 const RETENTION_OPTIONS: Retention[] = ['1 jour', '7 jours', '30 jours', '90 jours', 'Toujours'];
@@ -27,10 +30,10 @@ const RETENTION_OPTIONS: Retention[] = ['1 jour', '7 jours', '30 jours', '90 jou
 // The sensitivity setting is really an analysis rate: it decides how often the
 // scene is looked at, so it decides how fast a subject is confirmed. Saying so
 // beats leaving three words the user has to guess at.
-const SENS_HINT: Record<Sensitivity, string> = {
-  Basse: '1 image analysée par seconde — économe, mais un passage rapide peut échapper',
-  Moyenne: '3 images par seconde',
-  Haute: '5 images par seconde — détection la plus réactive, batterie la plus sollicitée',
+const SENS_HINT: Record<Sensitivity, StringKey> = {
+  Basse: 'setup.sens.hint.Basse',
+  Moyenne: 'setup.sens.hint.Moyenne',
+  Haute: 'setup.sens.hint.Haute',
 };
 
 export function SetupScreen() {
@@ -46,7 +49,7 @@ export function SetupScreen() {
 
   return (
     <View style={styles.screen}>
-      <Text style={styles.title}>Setup</Text>
+      <Text style={styles.title}>{t('setup.title')}</Text>
       {/* Landscape is ~800 dp wide: full-bleed rows would put a switch a whole
           screen away from the label it belongs to. */}
       <ScrollView
@@ -54,39 +57,39 @@ export function SetupScreen() {
         showsVerticalScrollIndicator={false}
       >
 
-        <CollapsibleSection title="SURVEILLANCE" expanded={settings.exp.surv} onToggle={() => s.toggleSection('surv')}>
-          <SettingRow label="Caméra utilisée">
+        <CollapsibleSection title={t('setup.section.surv')} expanded={settings.exp.surv} onToggle={() => s.toggleSection('surv')}>
+          <SettingRow label={t('setup.camera')}>
             <ValueButton label={settings.camera} onPress={s.cycleCamera} />
           </SettingRow>
           <SettingRow
-            label="Reprendre à l'ouverture"
-            subtitle="Android interdit à la caméra de démarrer seule après un redémarrage"
+            label={t('setup.resume')}
+            subtitle={t('setup.resume.sub')}
           >
             <Switch value={settings.resumeOnLaunch} onValueChange={s.toggleResumeOnLaunch} />
           </SettingRow>
-          <SettingRow label="Mode nuit" subtitle="Disponible sur cet appareil">
+          <SettingRow label={t('setup.night')} subtitle={t('setup.night.sub')}>
             <Switch value={settings.night} onValueChange={s.toggleNight} />
           </SettingRow>
         </CollapsibleSection>
 
-        <CollapsibleSection title="DÉTECTION" expanded={settings.exp.det} onToggle={() => s.toggleSection('det')}>
-          <SettingRow label="Détecter les personnes">
+        <CollapsibleSection title={t('setup.section.det')} expanded={settings.exp.det} onToggle={() => s.toggleSection('det')}>
+          <SettingRow label={t('setup.person')}>
             <Switch value={settings.person} onValueChange={s.togglePerson} />
           </SettingRow>
-          <SettingRow label="Détecter les animaux">
+          <SettingRow label={t('setup.animal')}>
             <Switch value={settings.animal} onValueChange={s.toggleAnimal} />
           </SettingRow>
-          <SettingRow label="Zoom auto sur les personnes" subtitle="Plan serré 4 s, puis plan large sur la scène">
+          <SettingRow label={t('setup.autoZoom')} subtitle={t('setup.autoZoom.sub')}>
             <Switch value={settings.autoZoom} onValueChange={s.toggleAutoZoom} />
           </SettingRow>
           <SettingRow
-            label="Détection sur le processeur"
-            subtitle="À essayer si rien n’est jamais détecté : force le calcul sur le CPU"
+            label={t('setup.forceCpu')}
+            subtitle={t('setup.forceCpu.sub')}
           >
             <Switch value={settings.forceCpu} onValueChange={s.toggleForceCpu} />
           </SettingRow>
           <View style={styles.subBlock}>
-            <Text style={styles.subLabel}>Sensibilité</Text>
+            <Text style={styles.subLabel}>{t('setup.sens')}</Text>
             <SegmentedControl
               options={SENS_OPTIONS}
               value={settings.sens}
@@ -96,13 +99,13 @@ export function SetupScreen() {
               segmentRadius={7}
             />
             <Text style={styles.hint}>
-              {SENS_HINT[settings.sens]}
+              {t(SENS_HINT[settings.sens])}
             </Text>
           </View>
           <View style={[styles.subBlock, { paddingTop: 14, paddingBottom: 2 }]}>
             <View style={styles.thresholdRow}>
-              <Text style={styles.subLabel}>Seuil de confiance</Text>
-              <Text style={styles.thresholdValue}>{settings.threshold} %</Text>
+              <Text style={styles.subLabel}>{t('setup.threshold')}</Text>
+              <Text style={styles.thresholdValue}>{t('detail.percent', { value: settings.threshold })}</Text>
             </View>
             <Slider
               minimumValue={50}
@@ -117,56 +120,54 @@ export function SetupScreen() {
           </View>
         </CollapsibleSection>
 
-        <CollapsibleSection title="ENREGISTREMENT" expanded={settings.exp.rec} onToggle={() => s.toggleSection('rec')}>
-          <SettingRow label="Durée après détection">
+        <CollapsibleSection title={t('setup.section.rec')} expanded={settings.exp.rec} onToggle={() => s.toggleSection('rec')}>
+          <SettingRow label={t('setup.post')}>
             <ValueButton label={settings.post} onPress={s.cyclePost} />
           </SettingRow>
           <SettingRow
-            label="Durée max. par clip"
-            subtitle="L’enregistrement continue tant qu’un sujet est visible : au-delà, il se poursuit dans un nouveau clip"
+            label={t('setup.max')}
+            subtitle={t('setup.max.sub')}
           >
             <ValueButton label={settings.max} onPress={s.cycleMax} />
           </SettingRow>
           <SettingRow
-            label="Qualité vidéo"
-            subtitle={settings.quality === '4K'
-              ? 'Le 4K quadruple aussi le coût de l’analyse des images'
-              : undefined}
+            label={t('setup.quality')}
+            subtitle={settings.quality === '4K' ? t('setup.quality.sub4k') : undefined}
           >
             <ValueButton label={settings.quality} onPress={s.cycleQuality} />
           </SettingRow>
         </CollapsibleSection>
 
-        <CollapsibleSection title="STOCKAGE" expanded={settings.exp.sto} onToggle={() => s.toggleSection('sto')}>
+        <CollapsibleSection title={t('setup.section.sto')} expanded={settings.exp.sto} onToggle={() => s.toggleSection('sto')}>
           <View style={[styles.subBlock, { borderTopWidth: 1, borderTopColor: color.divider }]}>
             <View style={styles.storageBarTrack}>
               <View style={[styles.storageBarFill, { width: `${usedPercent}%` }]} />
             </View>
             <View style={styles.storageStatsRow}>
               <View>
-                <Text style={styles.storageStatLabel}>Utilisé</Text>
+                <Text style={styles.storageStatLabel}>{t('setup.storage.used')}</Text>
                 <Text style={styles.storageStatValue}>{formatBytes(store.used)}</Text>
               </View>
               <View>
-                <Text style={styles.storageStatLabel}>Disponible</Text>
+                <Text style={styles.storageStatLabel}>{t('setup.storage.free')}</Text>
                 <Text style={styles.storageStatValue}>{formatBytes(store.free)}</Text>
               </View>
               <View>
-                <Text style={styles.storageStatLabel}>Vidéos</Text>
+                <Text style={styles.storageStatLabel}>{t('setup.storage.videos')}</Text>
                 <Text style={styles.storageStatValue}>{events.length}</Text>
               </View>
             </View>
           </View>
 
           <View style={[styles.subBlock, { borderTopWidth: 1, borderTopColor: color.divider }]}>
-            <Text style={styles.subLabel}>Conserver les vidéos</Text>
+            <Text style={styles.subLabel}>{t('setup.retention')}</Text>
             <View style={styles.retentionWrap}>
               {RETENTION_OPTIONS.map(opt => {
                 const on = settings.retention === opt;
                 return (
                   <ValueButton
                     key={opt}
-                    label={opt}
+                    label={tValue(`value.retention.${opt}`)}
                     onPress={() => s.setRetention(opt)}
                     active={on}
                     pill
@@ -176,48 +177,45 @@ export function SetupScreen() {
             </View>
           </View>
 
-          <SettingRow label="Suppression automatique" subtitle="Quand le stockage devient insuffisant">
+          <SettingRow label={t('setup.autoDel')} subtitle={t('setup.autoDel.sub')}>
             <Switch value={settings.autoDel} onValueChange={s.toggleAutoDel} />
           </SettingRow>
 
-          <SecondaryOutlineButton label="Supprimer toutes les vidéos" onPress={s.wipeAllVideos} style={{ marginTop: 10 }} />
+          <SecondaryOutlineButton label={t('setup.wipe')} onPress={s.wipeAllVideos} style={{ marginTop: 10 }} />
         </CollapsibleSection>
 
-        <CollapsibleSection title="NOTIFICATIONS" expanded={settings.exp.not} onToggle={() => s.toggleSection('not')}>
-          <SettingRow label="Notifications activées">
+        <CollapsibleSection title={t('setup.section.not')} expanded={settings.exp.not} onToggle={() => s.toggleSection('not')}>
+          <SettingRow label={t('setup.notif')}>
             <Switch value={settings.notif} onValueChange={s.toggleNotif} />
           </SettingRow>
-          <SettingRow label="À chaque détection">
+          <SettingRow label={t('setup.notifDet')}>
             <Switch value={settings.notifDet} onValueChange={s.toggleNotifDet} />
           </SettingRow>
           <SecondaryOutlineButton
-            label="Son et vibration (Android)"
+            label={t('setup.sound')}
             onPress={s.openAlertSoundSettings}
             style={{ marginTop: 10 }}
           />
-          <Text style={styles.hint}>
-            Depuis Android 8, le son et la vibration d'une notification appartiennent au
-            système, pas à l'application.
-          </Text>
+          <Text style={styles.hint}>{t('setup.sound.hint')}</Text>
         </CollapsibleSection>
 
-        <CollapsibleSection title="À PROPOS" expanded={settings.exp.about} onToggle={() => s.toggleSection('about')}>
-          <SettingRow label="Version">
+        <CollapsibleSection title={t('setup.section.about')} expanded={settings.exp.about} onToggle={() => s.toggleSection('about')}>
+          <SettingRow label={t('setup.version')}>
             <StaticValue label={APP_VERSION} />
           </SettingRow>
-          <SettingRow label="Licence" subtitle="Logiciel libre et open source">
+          <SettingRow label={t('setup.license')} subtitle={t('setup.license.sub')}>
             <StaticValue label={APP_LICENSE} />
           </SettingRow>
           {/* Only a real device can answer this, so the app measures itself
               rather than shipping a figure nobody took. */}
-          <SettingRow label="Coupure entre deux clips" subtitle={describeClipGap(clipGap)}>
+          <SettingRow label={t('setup.clipGap')} subtitle={describeClipGap(clipGap)}>
             <StaticValue label={formatClipGap(clipGap)} />
           </SettingRow>
           <View style={[styles.subBlock, { flexDirection: 'row', gap: 7 }]}>
-            <PrimaryOutlineButton label="Code source" onPress={() => Linking.openURL(REPO_URL)} style={{ flex: 1 }} />
-            <SecondaryOutlineButton label="Signaler un bug" onPress={() => Linking.openURL(ISSUES_URL)} style={{ flex: 1 }} />
+            <PrimaryOutlineButton label={t('setup.source')} onPress={() => Linking.openURL(REPO_URL)} style={{ flex: 1 }} />
+            <SecondaryOutlineButton label={t('setup.report')} onPress={() => Linking.openURL(ISSUES_URL)} style={{ flex: 1 }} />
           </View>
-          <SecondaryOutlineButton label="Licences tierces" onPress={() => s.openInfo('licenses')} style={{ marginTop: 8, marginBottom: 6 }} />
+          <SecondaryOutlineButton label={t('setup.thirdParty')} onPress={() => s.openInfo('licenses')} style={{ marginTop: 8, marginBottom: 6 }} />
         </CollapsibleSection>
 
         <LinearGradient
@@ -227,19 +225,17 @@ export function SetupScreen() {
           end={{ x: 0.75, y: 1 }}
           style={styles.privacyCard}
         >
-          <Text style={styles.privacyTitle}>CONFIDENTIALITÉ</Text>
+          <Text style={styles.privacyTitle}>{t('setup.privacy')}</Text>
           <View style={styles.privacyBody}>
             <ShieldCheckIcon size={18} color={color.accent} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.privacyHeading}>Traitement local</Text>
-              <Text style={styles.privacyText}>
-                La détection s&apos;exécute sur l&apos;appareil. Les vidéos restent sur votre téléphone et ne sont jamais envoyées sur un serveur.
-              </Text>
+              <Text style={styles.privacyHeading}>{t('setup.privacy.heading')}</Text>
+              <Text style={styles.privacyText}>{t('setup.privacy.body')}</Text>
             </View>
           </View>
           <View style={styles.privacyActions}>
-            <PrimaryOutlineButton label="Permissions" onPress={() => s.openInfo('perms')} style={{ flex: 1 }} />
-            <SecondaryOutlineButton label="Données stockées" onPress={() => s.openInfo('data')} style={{ flex: 1 }} />
+            <PrimaryOutlineButton label={t('setup.privacy.perms')} onPress={() => s.openInfo('perms')} style={{ flex: 1 }} />
+            <SecondaryOutlineButton label={t('setup.privacy.data')} onPress={() => s.openInfo('data')} style={{ flex: 1 }} />
           </View>
         </LinearGradient>
 

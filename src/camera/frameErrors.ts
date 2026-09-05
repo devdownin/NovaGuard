@@ -14,6 +14,8 @@
  * Pure on purpose — the wiring lives in `frameErrorGuard.ts`.
  */
 
+import { t } from '../i18n';
+
 /** The `name` VisionCamera stamps on an error it rethrows onto the JS thread. */
 export const FRAME_PROCESSOR_ERROR_NAME = 'Frame Processor Error';
 
@@ -27,7 +29,7 @@ const FRAME_PROCESSOR_ENGINE = 'VisionCamera';
  * so a frame processor that recovers takes its own banner down without wiping
  * an unrelated recording or foreground-service message.
  */
-export const FRAME_ERROR_PREFIX = 'Analyse';
+export const FRAME_ERROR_PREFIX = t('error.prefix.frame');
 
 /**
  * True for the errors VisionCamera rethrows out of a frame processor, and only
@@ -55,7 +57,7 @@ export function frameErrorMessage(error: unknown): string {
     ? error
     : (error as { message?: unknown } | null)?.message;
   const text = (typeof raw === 'string' ? raw : '').split('\n')[0].trim();
-  if (!text) return `${FRAME_ERROR_PREFIX} d'image interrompue`;
+  if (!text) return t('error.frame.interrupted');
   const clipped = text.length > MAX_MESSAGE ? `${text.slice(0, MAX_MESSAGE - 1)}…` : text;
-  return `${FRAME_ERROR_PREFIX} d'image : ${clipped}`;
+  return t('error.frame.detail', { message: clipped });
 }

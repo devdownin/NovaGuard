@@ -38,6 +38,7 @@ import {
 } from '../camera/frameTrace';
 import { countFrame, EMPTY_FRAME_RATE_WINDOW, FrameRateWindow } from '../camera/frameRate';
 import { ClipGapStats, EMPTY_CLIP_GAP_STATS, recordGap } from '../recording/clipGap';
+import { t } from '../i18n';
 
 interface AppStateValue {
   hydrated: boolean;
@@ -258,7 +259,9 @@ export const DISK_SWEEP_MS = 30_000;
  * again when it recovers. Anything else there was put up by recording or by the
  * foreground service and is not the camera's to take down.
  */
-const CAMERA_OWNED_ERROR = new RegExp(`^(Caméra|Modèle|${FRAME_ERROR_PREFIX})`);
+const CAMERA_OWNED_ERROR = new RegExp(
+  `^(${[t('error.prefix.camera'), t('error.prefix.model'), FRAME_ERROR_PREFIX].join('|')})`,
+);
 
 // Sessions now follow the tracker: one opens when a subject is *confirmed*
 // (seen on consecutive frames) and closes when every track has been dropped,
@@ -366,7 +369,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       // recording the user has, silently, at launch. Hold both off instead,
       // and say so rather than showing an empty Historique with no explanation.
       eventsWritableRef.current = storedEvents.ok;
-      if (!storedEvents.ok) setRecError('Historique illisible : les vidéos sont conservées');
+      if (!storedEvents.ok) setRecError(t('error.historyUnreadable'));
       // A stage left behind is a session that never finished a frame. The kind
       // of failure this catches — a segfault inside libyuv, LiteRT or ML Kit —
       // ends the process with nothing on screen and nothing in the log the user
@@ -848,7 +851,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     // permission to be held at that moment, and the resulting SecurityException
     // is thrown inside the service — nowhere a caller can catch it. Ask instead.
     if (!cameraPermission.hasPermission) {
-      setRecError('Autorisez la caméra pour démarrer la surveillance');
+      setRecError(t('error.grantCamera'));
       cameraPermission.requestPermission().then(granted => {
         // Carry on rather than making the user find the button again.
         if (granted) {

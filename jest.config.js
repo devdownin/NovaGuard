@@ -10,6 +10,10 @@ module.exports = {
   haste: { defaultPlatform: 'android', platforms: ['android', 'native'] },
   setupFiles: [
     '@react-native-async-storage/async-storage/jest',
+    // The locale, pinned for the same reason as the timezone above: this suite
+    // asserts the French interface. See the file for why it goes through
+    // NativeModules rather than Intl.
+    '<rootDir>/testing/frenchDevice.js',
   ],
   transform: {
     // Bundled TFLite model — treat it like RN's other binary assets under Jest.

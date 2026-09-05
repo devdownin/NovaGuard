@@ -1,6 +1,7 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { color, font, radius, shadow } from '../theme';
+import { t } from '../i18n';
 
 interface ConfirmDialogProps {
   visible: boolean;
@@ -13,7 +14,7 @@ interface ConfirmDialogProps {
 }
 
 export function ConfirmDialog({
-  visible, title, body, cancelLabel = 'Annuler', confirmLabel, onCancel, onConfirm,
+  visible, title, body, cancelLabel = t('confirm.cancel'), confirmLabel, onCancel, onConfirm,
 }: ConfirmDialogProps) {
   if (!visible) return null;
   return (

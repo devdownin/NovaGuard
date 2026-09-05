@@ -5,9 +5,10 @@ import { color, font } from '../theme';
 import { DetectionEvent } from '../state/types';
 import { formatDuration, formatWhen } from '../utils/date';
 import { ChevronRightIcon } from './icons';
+import { t } from '../i18n';
 
 export function EventCard({ event, onPress }: { event: DetectionEvent; onPress: () => void }) {
-  const title = event.kind === 'Personne' ? 'Personne détectée' : 'Animal détecté';
+  const title = t(event.kind === 'Personne' ? 'hist.event.person' : 'hist.event.animal');
   const durLabel = formatDuration(event.dur);
 
   return (
@@ -23,7 +24,7 @@ export function EventCard({ event, onPress }: { event: DetectionEvent; onPress: 
           <Text style={styles.title}>{title}</Text>
         </View>
         <Text style={styles.when}>{formatWhen(event.timestamp)}</Text>
-        <Text style={styles.meta}>{event.dur} secondes · {event.conf} %</Text>
+        <Text style={styles.meta}>{t('hist.event.meta', { dur: event.dur, conf: event.conf })}</Text>
       </View>
       <ChevronRightIcon size={7} color={color.neutral700} />
     </Pressable>
