@@ -9,7 +9,7 @@ import {
   Retention, Sensitivity, Settings, StorageInfo, Tab, VolumeSpace,
 } from './types';
 import {
-  defaultDetToday, defaultEvents, defaultLastDet, defaultSettings,
+  defaultDetToday, defaultEvents, defaultLastDetAt, defaultSettings,
 } from './defaults';
 import { dropStaleKeys, EMPTY_STORED_SIZE, storage, StoredSize } from './storage';
 import { useForeground } from './useForeground';
@@ -52,7 +52,8 @@ interface AppStateValue {
   /** What the current session is recording, or null. Survives the post-roll. */
   det: DetectionKind | null;
   detToday: number;
-  lastDet: string;
+  /** When the last detection was committed, or null. Formatted at render. */
+  lastDetAt: number | null;
   /** True only while a clip is actually being written to disk. */
   recording: boolean;
   /** Last recording failure, surfaced in the viewfinder instead of being swallowed. */
@@ -282,7 +283,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   // its setters through this sink, so a detection never re-renders this body.
   const viewfinder = useRef<ViewfinderSink | null>(null);
   const [detToday, setDetToday] = useState(defaultDetToday);
-  const [lastDet, setLastDet] = useState(defaultLastDet);
+  const [lastDetAt, setLastDetAt] = useState(defaultLastDetAt);
   const [recError, setRecError] = useState<string | null>(null);
   const [volume, setVolume] = useState<VolumeSpace>({ free: 0, total: 0 });
   /**
@@ -346,7 +347,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         storage.loadSettings(),
         storage.loadEvents(),
         storage.loadDetToday(),
-        storage.loadLastDet(),
+        storage.loadLastDetAt(),
         storage.loadMonitoring(),
         storage.loadOnboardingComplete(),
         storage.loadFrameStage(),
@@ -379,7 +380,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         if (diagnosis) setRecError(diagnosis);
       }
       setDetToday(todayCount(dt, Date.now()));
-      if (ld) setLastDet(ld);
+      if (typeof ld === 'number') setLastDetAt(ld);
       setOnb(onboarded ? null : 'intro');
 
       // Surveillance picks up where it left off. Gated on the camera permission
@@ -415,7 +416,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (hydrated) storage.saveDetToday({ count: detToday, day: Date.now() });
   }, [hydrated, detToday]);
-  useEffect(() => { if (hydrated) storage.saveLastDet(lastDet); }, [hydrated, lastDet]);
+  useEffect(() => { if (hydrated && lastDetAt != null) storage.saveLastDetAt(lastDetAt); }, [hydrated, lastDetAt]);
   /**
    * Remember that surveillance was on — but only once it has proved survivable.
    *
@@ -538,7 +539,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   ) => {
     const now = at;
     setDetToday(v => v + 1);
-    setLastDet(pad(new Date(now).getHours()) + ':' + pad(new Date(now).getMinutes()));
+    setLastDetAt(now);
     // Minted outside the updater: React may invoke an updater twice, and an id
     // that advanced on each invocation would not be the one that got committed.
     const id = nextEventId(lastEventIdRef.current, now);
@@ -1099,7 +1100,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<AppStateValue>(() => ({
     hydrated,
     tab, setTab,
-    monitoring, det, detToday, lastDet,
+    monitoring, det, detToday, lastDetAt,
     recording: isRecording, recError, clipGap, storage: store, cameraRef, foreground, reportCameraProblem, reportFrameStage,
     toggleMonitoring, reportDetections,
     events, filter, setFilter, period, setPeriod, periodOpen, togglePeriodOpen, selected, selectedEvent, selectEvent,
@@ -1111,7 +1112,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     info, storedSize, openInfo, closeInfo,
     onb, perms, onbNext, onbFinish, grantPermission,
   }), [
-    hydrated, tab, monitoring, det, detToday, lastDet,
+    hydrated, tab, monitoring, det, detToday, lastDetAt,
     isRecording, recError, clipGap, store, cameraRef, foreground, reportCameraProblem, reportFrameStage, toggleMonitoring, reportDetections,
     events, filter, period, periodOpen, togglePeriodOpen, selected, selectedEvent, selectEvent,
     confirmDelete, askDelete, cancelDelete, doDelete, confirmWipe, askWipe, cancelWipe, doWipe,

@@ -130,8 +130,11 @@ export function Viewfinder() {
         end={{ x: 0.35, y: 1 }}
         style={StyleSheet.absoluteFill}
       />
-      <GridOverlay />
-      <View style={styles.glowBlob} pointerEvents="none" />
+      {/* Chrome only while there is something to watch. At rest the frame is
+          bare, so the state of the app reads from across a room — which is the
+          distance a propped-up phone is normally looked at from. */}
+      {monitoring && <GridOverlay />}
+      {monitoring && <View style={styles.glowBlob} pointerEvents="none" />}
       <View style={styles.placeholderTextWrap} pointerEvents="none">
         <Text style={styles.placeholderText}>{standbyLabel}</Text>
         {standbySubtext && <Text style={styles.placeholderSubtext}>{standbySubtext}</Text>}
@@ -192,6 +195,19 @@ export function Viewfinder() {
           <RecDot />
           <Text style={styles.recLabel} maxFontSizeMultiplier={MAX_FONT_SCALE}>REC</Text>
           <RecTimer />
+        </View>
+      )}
+
+      {/* What the capture zoom costs, stated. CameraX applies the crop to the
+          whole use-case group, so at z only 1/z² of the sensor is left — and
+          what falls outside reaches neither the recording nor the detector.
+          A close shot that quietly stops covering two thirds of the room is
+          exactly what a surveillance camera must not do in silence. */}
+      {autoZoom.cameraZoom > 1 && (
+        <View style={styles.coverageChip} pointerEvents="none">
+          <Text style={styles.coverageText} maxFontSizeMultiplier={MAX_FONT_SCALE}>
+            {t('view.coverage', { percent: Math.round(100 / (autoZoom.cameraZoom ** 2)) })}
+          </Text>
         </View>
       )}
 
@@ -327,6 +343,24 @@ const styles = StyleSheet.create({
     fontFamily: font.regular,
     fontSize: 10.5,
     color: color.neutral400,
+    fontVariant: ['tabular-nums'],
+  },
+  coverageChip: {
+    position: 'absolute',
+    left: 12,
+    bottom: 34,
+    paddingVertical: 4,
+    paddingHorizontal: 9,
+    borderRadius: 999,
+    backgroundColor: 'rgba(22,24,38,0.68)',
+    borderWidth: 1,
+    borderColor: color.neutral700,
+  },
+  coverageText: {
+    fontFamily: font.medium,
+    fontSize: 9.5,
+    letterSpacing: 0.6,
+    color: color.neutral300,
     fontVariant: ['tabular-nums'],
   },
   zoomChip: {

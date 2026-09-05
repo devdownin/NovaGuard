@@ -38,6 +38,7 @@ export const en: Record<StringKey, string> = {
   'view.overlay.animal': 'Animal detected · recording',
   'view.overlay.none': 'Nothing detected',
   'view.overlay.idle': 'Camera on standby',
+  'view.coverage': 'Field narrowed · {percent} %',
   'view.zoom.close': 'CLOSE SHOT',
   'view.zoom.wide': 'WIDE SHOT',
 
@@ -46,6 +47,9 @@ export const en: Record<StringKey, string> = {
   'hist.count.one': '{count} video',
   'hist.count.other': '{count} videos',
   'hist.empty': 'No event for this filter.',
+  'hist.empty.reset': 'Show everything',
+  'hist.empty.never': 'Nothing has been filmed yet.',
+  'hist.empty.never.sub': 'Start monitoring from the Camera tab: every confirmed person or animal writes a video here.',
   'hist.event.person': 'Person detected',
   'hist.event.animal': 'Animal detected',
   'hist.event.meta': '{dur} seconds · {conf} %',
@@ -261,6 +265,9 @@ export const en: Record<StringKey, string> = {
   'date.today': 'Today, {time}',
   'date.yesterday': 'Yesterday, {time}',
   'date.other': '{month} {day}, {time}',
+  'date.dayToday': 'Today',
+  'date.dayYesterday': 'Yesterday',
+  'date.dayOther': '{month} {day}',
   'date.months': 'Jan,Feb,Mar,Apr,May,Jun,Jul,Aug,Sep,Oct,Nov,Dec',
 
   // ── stored values, displayed ─────────────────────────────────────────

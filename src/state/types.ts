@@ -128,6 +128,6 @@ export interface PersistedState {
   settings: Settings;
   events: DetectionEvent[];
   detToday: DayCount;
-  lastDet: string;
+  lastDetAt: number | null;
   onboardingComplete: boolean;
 }

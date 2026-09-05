@@ -107,12 +107,15 @@ describe('cold start', () => {
 
   it('reads persisted state back instead of falling back to defaults', async () => {
     await AsyncStorage.setItem('@novaguard:settings', JSON.stringify(defaultSettings));
-    await AsyncStorage.setItem('@novaguard:lastDet', JSON.stringify('07:33'));
+    // 07:33 today, stored as the instant it happened rather than as a clock
+    // reading — see `storage.ts`, where the old string key is now stale.
+    const at = new Date(); at.setHours(7, 33, 0, 0);
+    await AsyncStorage.setItem('@novaguard:lastDetAt', JSON.stringify(at.getTime()));
     await AsyncStorage.setItem('@novaguard:onboardingComplete', 'true');
 
     const shown = texts(await finishBoot(await startApp()));
     // The stored value is on screen, so hydration ran end to end.
-    expect(shown).toEqual(expect.arrayContaining(['07:33']));
+    expect(shown).toEqual(expect.arrayContaining(["Aujourd'hui, 07:33"]));
     expect(shown).not.toEqual(expect.arrayContaining(['—']));
   });
 
